@@ -3,9 +3,9 @@
   "name": "llama.cpp",
   "theme": "aspen",
   "colors": {
-    "primary": "#2563eb",
-    "light": "#3b82f6",
-    "dark": "#1e40af"
+    "primary": "#EF8949",
+    "light": "#EF8949",
+    "dark": "#EF8949"
   },
   "navbar": {
     "primary": {
@@ -126,5 +126,5 @@
     ]
   },
   "favicon": "/images/134263123.jpeg",
-  "logo": "/images/230134379-7181e485-c521-4d23-a0d6-f7b3b61ba524-removebg-preview.png"
+  "logo": "/images/llamacpp.png"
 }
