@@ -1,0 +1,142 @@
+{
+  "projectType": "ai-ml",
+  "projectName": "llama.cpp",
+  "projectDescription": "LLM inference in C/C++ with minimal setup and state-of-the-art performance across hardware platforms",
+  "theme": "aspen",
+  "primaryColor": "#2563eb",
+  "lightColor": "#3b82f6",
+  "darkColor": "#1e40af",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/gguf-format",
+              "concepts/quantization",
+              "concepts/backends",
+              "concepts/architecture"
+            ]
+          },
+          {
+            "group": "Inference",
+            "pages": [
+              "inference/cli",
+              "inference/server",
+              "inference/embeddings",
+              "inference/multimodal",
+              "inference/speculative-decoding"
+            ]
+          },
+          {
+            "group": "Models",
+            "pages": [
+              "models/supported-models",
+              "models/obtaining-models",
+              "models/converting-models",
+              "models/quantizing-models"
+            ]
+          },
+          {
+            "group": "Advanced",
+            "pages": [
+              "advanced/performance-tuning",
+              "advanced/grammars",
+              "advanced/function-calling",
+              "advanced/docker"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "C/C++ API",
+            "pages": [
+              "api/libllama",
+              "api/model-loading",
+              "api/inference",
+              "api/sampling"
+            ]
+          },
+          {
+            "group": "REST API",
+            "pages": [
+              "api/rest/overview",
+              "api/rest/chat-completions",
+              "api/rest/completions",
+              "api/rest/embeddings"
+            ]
+          },
+          {
+            "group": "Tools",
+            "pages": [
+              "api/tools/llama-cli",
+              "api/tools/llama-server",
+              "api/tools/llama-bench",
+              "api/tools/llama-perplexity"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Development",
+        "groups": [
+          {
+            "group": "Building",
+            "pages": [
+              "development/building",
+              "development/build-options",
+              "development/cmake-presets"
+            ]
+          },
+          {
+            "group": "Contributing",
+            "pages": [
+              "development/contributing",
+              "development/adding-models",
+              "development/testing"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Minimal setup C/C++ LLM inference",
+    "Multiple quantization levels (1.5-bit to 8-bit)",
+    "Multi-platform backend support (Metal, CUDA, Vulkan, etc.)",
+    "OpenAI-compatible REST API server",
+    "Extensive model support (LLaMA, Mistral, Gemma, Qwen, etc.)",
+    "Hardware acceleration for Apple Silicon, x86, and GPUs",
+    "Multimodal model support",
+    "Speculative decoding and parallel inference"
+  ],
+  "publicApiSurface": [
+    "llama_model_load",
+    "llama_context_new",
+    "llama_decode",
+    "llama_sample",
+    "llama_tokenize",
+    "llama_detokenize",
+    "llama-cli",
+    "llama-server",
+    "llama-bench",
+    "llama-perplexity",
+    "convert_hf_to_gguf.py",
+    "/v1/chat/completions",
+    "/v1/completions",
+    "/v1/embeddings"
+  ]
+}
