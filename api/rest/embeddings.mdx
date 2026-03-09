@@ -1,0 +1,485 @@
+---
+title: Embeddings
+description: OpenAI-compatible embeddings endpoint for vector generation
+---
+
+The `/v1/embeddings` endpoint generates vector embeddings from text input. Embeddings are numerical representations that can be used for semantic search, clustering, recommendations, and other ML tasks.
+
+## Endpoint
+
+```
+POST /v1/embeddings
+```
+
+<Note>
+This endpoint requires models with pooling enabled. Start the server with `--pooling` to specify the pooling type, or let the model use its default.
+</Note>
+
+## Request Format
+
+### Required Parameters
+
+<ParamField path="model" type="string" required>
+  Model identifier. Use an embedding-specific model for best results (e.g., models based on BERT, Sentence Transformers, or specialized embedding models).
+</ParamField>
+
+<ParamField path="input" type="string | array" required>
+  Text to generate embeddings for. Can be:
+  - A single string: `"Hello world"`
+  - An array of strings: `["Hello", "world"]`
+  - An array of token IDs: `[12, 34, 56]`
+  - An array of token arrays: `[[12, 34], [56, 78]]`
+</ParamField>
+
+### Optional Parameters
+
+<ParamField path="encoding_format" type="string" default="float">
+  Format for the embeddings:
+  - `float` - Array of floating point numbers
+  - `base64` - Base64-encoded float array (more efficient for large batches)
+</ParamField>
+
+<ParamField path="dimensions" type="number">
+  Number of dimensions for the output embeddings. If specified, embeddings will be truncated or padded.
+  
+  <Note>Not all models support dimension adjustment. Check model capabilities.</Note>
+</ParamField>
+
+<ParamField path="user" type="string">
+  Unique identifier for end-user tracking (optional, for monitoring).
+</ParamField>
+
+## Request Examples
+
+<CodeGroup>
+```bash Single Text
+curl http://localhost:8080/v1/embeddings \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer no-key" \
+  -d '{
+    "model": "text-embedding-ada-002",
+    "input": "The food was delicious and the waiter was very friendly.",
+    "encoding_format": "float"
+  }'
+```
+
+```bash Multiple Texts
+curl http://localhost:8080/v1/embeddings \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer no-key" \
+  -d '{
+    "model": "text-embedding-ada-002",
+    "input": [
+      "The food was delicious",
+      "The service was excellent",
+      "Great ambiance and music"
+    ]
+  }'
+```
+
+```python Python Client
+import openai
+
+client = openai.OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key="sk-no-key-required"
+)
+
+response = client.embeddings.create(
+    model="text-embedding-ada-002",
+    input="Your text string goes here",
+    encoding_format="float"
+)
+
+embedding = response.data[0].embedding
+print(f"Embedding length: {len(embedding)}")
+print(f"First 5 values: {embedding[:5]}")
+```
+
+```python Batch Processing
+import openai
+import numpy as np
+
+client = openai.OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key="sk-no-key-required"
+)
+
+texts = [
+    "Machine learning is fascinating",
+    "Deep learning powers modern AI",
+    "Natural language processing enables text understanding"
+]
+
+response = client.embeddings.create(
+    model="text-embedding-ada-002",
+    input=texts
+)
+
+embeddings = [item.embedding for item in response.data]
+print(f"Generated {len(embeddings)} embeddings")
+print(f"Embedding dimension: {len(embeddings[0])}")
+```
+
+```bash Base64 Encoding
+curl http://localhost:8080/v1/embeddings \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "text-embedding-ada-002",
+    "input": "Sample text for embedding",
+    "encoding_format": "base64"
+  }'
+```
+</CodeGroup>
+
+## Response Format
+
+<ResponseField name="object" type="string">
+  Always `"list"` for embeddings responses.
+</ResponseField>
+
+<ResponseField name="data" type="array">
+  Array of embedding objects. Each object contains:
+  - `object` (string) - Always `"embedding"`
+  - `embedding` (array | string) - The embedding vector (float array or base64 string)
+  - `index` (number) - Position in the input array
+</ResponseField>
+
+<ResponseField name="model" type="string">
+  The model used to generate embeddings.
+</ResponseField>
+
+<ResponseField name="usage" type="object">
+  Token usage information:
+  - `prompt_tokens` (number) - Number of tokens in the input
+  - `total_tokens` (number) - Total tokens processed
+</ResponseField>
+
+### Example Response
+
+```json
+{
+  "object": "list",
+  "data": [
+    {
+      "object": "embedding",
+      "embedding": [
+        0.0023064255,
+        -0.009327292,
+        -0.0028842222,
+        0.015589447,
+        -0.008376982,
+        // ... (1536 dimensions total for ada-002)
+      ],
+      "index": 0
+    }
+  ],
+  "model": "text-embedding-ada-002",
+  "usage": {
+    "prompt_tokens": 8,
+    "total_tokens": 8
+  }
+}
+```
+
+### Multiple Inputs Response
+
+```json
+{
+  "object": "list",
+  "data": [
+    {
+      "object": "embedding",
+      "embedding": [0.0023064255, -0.009327292, ...],
+      "index": 0
+    },
+    {
+      "object": "embedding",
+      "embedding": [0.0043521156, -0.012456789, ...],
+      "index": 1
+    },
+    {
+      "object": "embedding",
+      "embedding": [0.0031234567, -0.007654321, ...],
+      "index": 2
+    }
+  ],
+  "model": "text-embedding-ada-002",
+  "usage": {
+    "prompt_tokens": 24,
+    "total_tokens": 24
+  }
+}
+```
+
+## Setting Up Embedding Models
+
+### Download Embedding Model
+
+```bash
+# Nomic Embed Text (768 dimensions)
+llama-server -hf nomic-ai/nomic-embed-text-v1.5-GGUF:Q8_0 --pooling mean
+
+# BGE Base (768 dimensions)
+llama-server -hf BAAI/bge-base-en-v1.5-GGUF:Q8_0 --pooling cls
+
+# All-MiniLM (384 dimensions)
+llama-server -m models/all-minilm-l6-v2.gguf --pooling mean
+```
+
+### Pooling Types
+
+<ParamField path="--pooling" type="string">
+  Pooling method for generating embeddings:
+  - `mean` - Average of all token embeddings (most common)
+  - `cls` - Use [CLS] token embedding (BERT-style)
+  - `last` - Use last token embedding
+  - `none` - No pooling, returns per-token embeddings
+  - `rank` - For reranking models
+</ParamField>
+
+## Use Cases
+
+### Semantic Search
+
+Find similar documents by computing cosine similarity:
+
+```python
+import openai
+import numpy as np
+from numpy.linalg import norm
+
+client = openai.OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key="sk-no-key-required"
+)
+
+def cosine_similarity(a, b):
+    return np.dot(a, b) / (norm(a) * norm(b))
+
+# Create embeddings
+documents = [
+    "Python is a programming language",
+    "Machine learning uses algorithms",
+    "Dogs are loyal pets"
+]
+
+query = "What is Python?"
+
+# Get embeddings
+response = client.embeddings.create(
+    model="text-embedding-ada-002",
+    input=documents + [query]
+)
+
+doc_embeddings = [response.data[i].embedding for i in range(len(documents))]
+query_embedding = response.data[-1].embedding
+
+# Find most similar
+for i, doc in enumerate(documents):
+    similarity = cosine_similarity(query_embedding, doc_embeddings[i])
+    print(f"{similarity:.4f}: {doc}")
+```
+
+Output:
+```
+0.8234: Python is a programming language
+0.6541: Machine learning uses algorithms
+0.4123: Dogs are loyal pets
+```
+
+### Text Clustering
+
+Group similar texts together:
+
+```python
+from sklearn.cluster import KMeans
+import numpy as np
+
+# Generate embeddings for texts
+texts = [
+    "cat", "dog", "car", "truck", "kitten", "puppy", "vehicle", "automobile"
+]
+
+response = client.embeddings.create(
+    model="text-embedding-ada-002",
+    input=texts
+)
+
+embeddings = np.array([item.embedding for item in response.data])
+
+# Cluster into 2 groups
+kmeans = KMeans(n_clusters=2, random_state=0)
+labels = kmeans.fit_predict(embeddings)
+
+for label in set(labels):
+    cluster_texts = [texts[i] for i, l in enumerate(labels) if l == label]
+    print(f"Cluster {label}: {cluster_texts}")
+```
+
+Output:
+```
+Cluster 0: ['cat', 'dog', 'kitten', 'puppy']
+Cluster 1: ['car', 'truck', 'vehicle', 'automobile']
+```
+
+### Recommendations
+
+Find items similar to user preferences:
+
+```python
+# User liked these items
+liked_items = [
+    "Science fiction novel",
+    "Space exploration documentary"
+]
+
+# Candidate items
+candidates = [
+    "Historical drama series",
+    "Mars colonization movie",
+    "Cooking tutorial",
+    "Astronomy textbook"
+]
+
+# Get embeddings
+response = client.embeddings.create(
+    model="text-embedding-ada-002",
+    input=liked_items + candidates
+)
+
+liked_embeddings = [response.data[i].embedding for i in range(len(liked_items))]
+candidate_embeddings = [response.data[i+len(liked_items)].embedding 
+                        for i in range(len(candidates))]
+
+# Compute average liked embedding
+avg_liked = np.mean(liked_embeddings, axis=0)
+
+# Rank candidates
+scores = [(i, cosine_similarity(avg_liked, emb)) 
+          for i, emb in enumerate(candidate_embeddings)]
+scores.sort(key=lambda x: x[1], reverse=True)
+
+print("Recommendations:")
+for idx, score in scores:
+    print(f"{score:.4f}: {candidates[idx]}")
+```
+
+## Multimodal Embeddings
+
+For models with multimodal support, you can embed images along with text:
+
+```json
+{
+  "model": "clip-vit-large",
+  "input": [
+    "A photo of a cat",
+    {"type": "image", "data": "base64_encoded_image_data"}
+  ]
+}
+```
+
+<Note>
+Multimodal embedding support is experimental. Check model documentation for capabilities.
+</Note>
+
+## Normalization
+
+Embeddings from `/v1/embeddings` are automatically normalized using Euclidean (L2) norm. This means:
+- All embedding vectors have length 1.0
+- Cosine similarity equals dot product
+- Ready for vector databases
+
+To verify normalization:
+
+```python
+import numpy as np
+
+embedding = response.data[0].embedding
+norm = np.linalg.norm(embedding)
+print(f"Embedding norm: {norm:.6f}")  # Should be ~1.0
+```
+
+## Performance Optimization
+
+### Batch Processing
+
+Process multiple texts in a single request:
+
+```python
+# Efficient: Single request
+response = client.embeddings.create(
+    model="text-embedding-ada-002",
+    input=["text1", "text2", "text3", ...]
+)
+
+# Inefficient: Multiple requests
+for text in texts:
+    response = client.embeddings.create(
+        model="text-embedding-ada-002",
+        input=text
+    )
+```
+
+### Model Selection
+
+| Model Type | Dimensions | Use Case |
+|------------|------------|----------|
+| all-MiniLM-L6 | 384 | Fast, general purpose |
+| BGE-base | 768 | Balanced quality/speed |
+| Nomic Embed | 768 | Long context support |
+| BGE-large | 1024 | High quality |
+
+### Context Window
+
+Start server with appropriate context size:
+
+```bash
+# For long documents
+llama-server -m embedding-model.gguf -c 8192 --pooling mean
+```
+
+## Error Responses
+
+```json
+{
+  "error": {
+    "message": "This model requires pooling to be enabled",
+    "type": "invalid_request_error",
+    "code": 400
+  }
+}
+```
+
+Common errors:
+- **No pooling enabled**: Start server with `--pooling` flag
+- **Input too long**: Reduce text length or increase context size with `-c`
+- **Invalid encoding format**: Use `float` or `base64`
+
+## Comparing to Native Endpoint
+
+llama.cpp also provides `/embedding` (non-OAI compatible):
+
+| Feature | `/v1/embeddings` | `/embedding` |
+|---------|------------------|-------------|
+| Format | OpenAI-compatible | llama.cpp native |
+| Normalization | Always L2 normalized | Configurable |
+| Output | Single pooled vector | Can return per-token |
+| Compatibility | Works with OpenAI clients | Custom clients only |
+
+For most use cases, prefer `/v1/embeddings` for compatibility.
+
+## Best Practices
+
+1. **Use dedicated embedding models**: Don't use chat/completion models for embeddings
+2. **Batch requests**: Send multiple texts together for efficiency
+3. **Normalize queries**: Keep input text clean and consistent
+4. **Cache embeddings**: Reuse embeddings for unchanged content
+5. **Choose appropriate dimensions**: Smaller models (384d) for speed, larger (1024d) for quality
+6. **Monitor context limits**: Split very long texts if needed
+
+## Next Steps
+
+- [Chat Completions](/api/rest/chat-completions) - Conversational AI
+- [Completions](/api/rest/completions) - Text generation
+- Vector databases: Integrate with Pinecone, Weaviate, or Milvus for semantic search

@@ -1,0 +1,418 @@
+---
+title: 'llama-bench'
+description: 'Performance testing and benchmarking tool for llama.cpp'
+---
+
+## Overview
+
+`llama-bench` is a comprehensive performance testing tool for llama.cpp that measures inference speed, throughput, and resource utilization. It's designed to help you optimize model configurations and compare performance across different settings.
+
+## Quick Start
+
+```bash
+# Run with defaults
+llama-bench -m model.gguf
+
+# Output:
+# | model               |       size |     params | backend    | threads |          test |                  t/s |
+# | ------------------- | ---------: | ---------: | ---------- | ------: | ------------: | -------------------: |
+# | qwen2 1.5B Q4_0     | 885.97 MiB |     1.54 B | Metal,BLAS |      16 |         pp512 |      5765.41 ± 20.55 |
+# | qwen2 1.5B Q4_0     | 885.97 MiB |     1.54 B | Metal,BLAS |      16 |         tg128 |        197.71 ± 0.81 |
+```
+
+## Test Types
+
+`llama-bench` performs three types of tests:
+
+### Prompt Processing (pp)
+
+Measures how fast the model processes a prompt in batches.
+
+```bash
+llama-bench -m model.gguf -p 512 -n 0
+```
+
+### Text Generation (tg)
+
+Measures token generation speed.
+
+```bash
+llama-bench -m model.gguf -p 0 -n 128
+```
+
+### Combined (pg)
+
+Measures prompt processing followed by text generation.
+
+```bash
+llama-bench -m model.gguf -pg 512,128
+```
+
+## Command-Line Options
+
+### Basic Options
+
+<ParamField path="-h, --help" type="flag">
+  Display help message and exit.
+</ParamField>
+
+<ParamField path="-r, --repetitions" type="integer" default="5">
+  Number of times to repeat each test for averaging.
+</ParamField>
+
+<ParamField path="--delay" type="integer" default="0">
+  Delay between each test in seconds.
+</ParamField>
+
+<ParamField path="-o, --output" type="string" default="md">
+  Output format: `md` (markdown), `csv`, `json`, `jsonl`, or `sql`.
+</ParamField>
+
+<ParamField path="-oe, --output-err" type="string">
+  Output format for stderr (same options as `-o`).
+</ParamField>
+
+<ParamField path="-v, --verbose" type="flag">
+  Enable verbose output.
+</ParamField>
+
+<ParamField path="--progress" type="flag">
+  Print test progress indicators.
+</ParamField>
+
+### Test Parameters
+
+<ParamField path="-m, --model" type="string">
+  Path to model file. Can specify multiple models.
+  
+  Default: `models/7B/ggml-model-q4_0.gguf`
+</ParamField>
+
+<ParamField path="-p, --n-prompt" type="integer" default="512">
+  Number of prompt tokens for prompt processing test.
+</ParamField>
+
+<ParamField path="-n, --n-gen" type="integer" default="128">
+  Number of tokens to generate for text generation test.
+</ParamField>
+
+<ParamField path="-pg" type="string">
+  Combined prompt processing and text generation test.
+  
+  Format: `pp,tg` (e.g., `-pg 512,128`)
+</ParamField>
+
+<ParamField path="-d, --n-depth" type="integer" default="0">
+  Context depth: prefill KV cache with this many tokens before testing.
+</ParamField>
+
+### Performance Options
+
+<ParamField path="-b, --batch-size" type="integer" default="2048">
+  Logical batch size.
+</ParamField>
+
+<ParamField path="-ub, --ubatch-size" type="integer" default="512">
+  Physical batch size.
+</ParamField>
+
+<ParamField path="-t, --threads" type="integer">
+  Number of CPU threads. Can specify multiple values.
+</ParamField>
+
+<ParamField path="-ngl, --n-gpu-layers" type="integer" default="99">
+  Number of layers to offload to GPU.
+</ParamField>
+
+<ParamField path="-sm, --split-mode" type="string" default="layer">
+  How to split model across GPUs: `none`, `layer`, or `row`.
+</ParamField>
+
+<ParamField path="-fa, --flash-attn" type="boolean" default="0">
+  Enable Flash Attention (0 or 1).
+</ParamField>
+
+## Usage Examples
+
+### Compare Different Models
+
+```bash
+llama-bench \
+  -m models/7B/ggml-model-q4_0.gguf \
+  -m models/13B/ggml-model-q4_0.gguf \
+  -p 0 -n 128,256,512
+```
+
+Output:
+
+| model                          |       size |     params | backend    | ngl | test       |              t/s |
+| ------------------------------ | ---------: | ---------: | ---------- | --: | ---------- | ---------------: |
+| llama 7B mostly Q4_0           |   3.56 GiB |     6.74 B | CUDA       |  99 | tg 128     |    132.19 ± 0.55 |
+| llama 7B mostly Q4_0           |   3.56 GiB |     6.74 B | CUDA       |  99 | tg 256     |    129.37 ± 0.54 |
+| llama 7B mostly Q4_0           |   3.56 GiB |     6.74 B | CUDA       |  99 | tg 512     |    123.83 ± 0.25 |
+| llama 13B mostly Q4_0          |   6.86 GiB |    13.02 B | CUDA       |  99 | tg 128     |     82.17 ± 0.31 |
+| llama 13B mostly Q4_0          |   6.86 GiB |    13.02 B | CUDA       |  99 | tg 256     |     80.74 ± 0.23 |
+| llama 13B mostly Q4_0          |   6.86 GiB |    13.02 B | CUDA       |  99 | tg 512     |     78.08 ± 0.07 |
+
+### Test Batch Size Impact
+
+```bash
+llama-bench -n 0 -p 1024 -b 128,256,512,1024
+```
+
+Output:
+
+| model                          |       size |     params | backend    | ngl |    n_batch | test       |              t/s |
+| ------------------------------ | ---------: | ---------: | ---------- | --: | ---------: | ---------- | ---------------: |
+| llama 7B mostly Q4_0           |   3.56 GiB |     6.74 B | CUDA       |  99 |        128 | pp 1024    |   1436.51 ± 3.66 |
+| llama 7B mostly Q4_0           |   3.56 GiB |     6.74 B | CUDA       |  99 |        256 | pp 1024    |  1932.43 ± 23.48 |
+| llama 7B mostly Q4_0           |   3.56 GiB |     6.74 B | CUDA       |  99 |        512 | pp 1024    |  2254.45 ± 15.59 |
+| llama 7B mostly Q4_0           |   3.56 GiB |     6.74 B | CUDA       |  99 |       1024 | pp 1024    |  2498.61 ± 13.58 |
+
+### Test Thread Scaling
+
+```bash
+llama-bench -n 0 -n 16 -p 64 -t 1,2,4,8,16,32
+```
+
+| model                          |       size |     params | backend    |    threads | test       |              t/s |
+| ------------------------------ | ---------: | ---------: | ---------- | ---------: | ---------- | ---------------: |
+| llama 7B mostly Q4_0           |   3.56 GiB |     6.74 B | CPU        |          1 | pp 64      |      6.17 ± 0.07 |
+| llama 7B mostly Q4_0           |   3.56 GiB |     6.74 B | CPU        |          1 | tg 16      |      4.05 ± 0.02 |
+| llama 7B mostly Q4_0           |   3.56 GiB |     6.74 B | CPU        |          2 | pp 64      |     12.31 ± 0.13 |
+| llama 7B mostly Q4_0           |   3.56 GiB |     6.74 B | CPU        |          2 | tg 16      |      7.80 ± 0.07 |
+| llama 7B mostly Q4_0           |   3.56 GiB |     6.74 B | CPU        |          4 | pp 64      |     23.18 ± 0.06 |
+| llama 7B mostly Q4_0           |   3.56 GiB |     6.74 B | CPU        |          4 | tg 16      |     12.22 ± 0.07 |
+
+### Test GPU Layer Offloading
+
+```bash
+llama-bench -ngl 10,20,30,31,32,33,34,35
+```
+
+| model                          |       size |     params | backend    | ngl | test       |              t/s |
+| ------------------------------ | ---------: | ---------: | ---------- | --: | ---------- | ---------------: |
+| llama 7B mostly Q4_0           |   3.56 GiB |     6.74 B | CUDA       |  10 | pp 512     |    373.36 ± 2.25 |
+| llama 7B mostly Q4_0           |   3.56 GiB |     6.74 B | CUDA       |  10 | tg 128     |     13.45 ± 0.93 |
+| llama 7B mostly Q4_0           |   3.56 GiB |     6.74 B | CUDA       |  20 | pp 512     |    472.65 ± 1.25 |
+| llama 7B mostly Q4_0           |   3.56 GiB |     6.74 B | CUDA       |  20 | tg 128     |     21.36 ± 1.94 |
+| llama 7B mostly Q4_0           |   3.56 GiB |     6.74 B | CUDA       |  30 | pp 512     |   631.87 ± 11.25 |
+| llama 7B mostly Q4_0           |   3.56 GiB |     6.74 B | CUDA       |  30 | tg 128     |     40.04 ± 1.82 |
+
+### Test Prefilled Context
+
+Test performance with warm KV cache:
+
+```bash
+llama-bench -d 0,512
+```
+
+| model                          |       size |     params | backend    | ngl |            test |                  t/s |
+| ------------------------------ | ---------: | ---------: | ---------- | --: | --------------: | -------------------: |
+| qwen2 7B Q4_K - Medium         |   4.36 GiB |     7.62 B | CUDA       |  99 |           pp512 |      7340.20 ± 23.45 |
+| qwen2 7B Q4_K - Medium         |   4.36 GiB |     7.62 B | CUDA       |  99 |           tg128 |        120.60 ± 0.59 |
+| qwen2 7B Q4_K - Medium         |   4.36 GiB |     7.62 B | CUDA       |  99 |    pp512 @ d512 |      6425.91 ± 18.88 |
+| qwen2 7B Q4_K - Medium         |   4.36 GiB |     7.62 B | CUDA       |  99 |    tg128 @ d512 |        116.71 ± 0.60 |
+
+## Multiple Values & Ranges
+
+You can specify multiple values in three ways:
+
+### Comma-Separated
+
+```bash
+llama-bench -t 4,8,16
+```
+
+### Multiple Flags
+
+```bash
+llama-bench -t 4 -t 8 -t 16
+```
+
+### Ranges
+
+```bash
+# Linear range: first-last
+llama-bench -t 4-16
+
+# With step: first-last+step
+llama-bench -t 4-16+4  # 4, 8, 12, 16
+
+# Multiplicative: first-last*mult
+llama-bench -ngl 1-32*2  # 1, 2, 4, 8, 16, 32
+```
+
+## Output Formats
+
+### Markdown (Default)
+
+```bash
+llama-bench -o md
+```
+
+Produces formatted tables suitable for documentation.
+
+### CSV
+
+```bash
+llama-bench -o csv > results.csv
+```
+
+Comma-separated values for spreadsheet import.
+
+### JSON
+
+```bash
+llama-bench -o json > results.json
+```
+
+Structured data with individual repetition samples:
+
+```json
+[
+  {
+    "build_commit": "8cf427ff",
+    "build_number": 5163,
+    "model_type": "qwen2 7B Q4_K - Medium",
+    "n_prompt": 512,
+    "n_gen": 0,
+    "avg_ts": 7100.002165,
+    "stddev_ts": 140.341520,
+    "samples_ns": [74601900, 71632900, 71745200, 71952700, 70745500],
+    "samples_ts": [6863.1, 7147.55, 7136.37, 7115.79, 7237.21]
+  }
+]
+```
+
+### JSONL (JSON Lines)
+
+```bash
+llama-bench -o jsonl > results.jsonl
+```
+
+One JSON object per line, suitable for streaming processing.
+
+### SQL
+
+```bash
+llama-bench -o sql | sqlite3 benchmark.db
+```
+
+Generates SQL statements for direct database import:
+
+```sql
+CREATE TABLE IF NOT EXISTS test (
+  build_commit TEXT,
+  model_type TEXT,
+  n_prompt INTEGER,
+  n_gen INTEGER,
+  avg_ts REAL,
+  stddev_ts REAL,
+  ...
+);
+
+INSERT INTO test (...) VALUES (...);
+```
+
+## Advanced Options
+
+### NUMA Configuration
+
+```bash
+llama-bench --numa distribute  # Spread across NUMA nodes
+llama-bench --numa isolate     # Isolate to single node
+llama-bench --numa numactl     # Use numactl CPU map
+```
+
+### Priority & Polling
+
+<ParamField path="--prio" type="integer" default="0">
+  Process/thread priority:
+  - `0`: Normal
+  - `1`: Medium  
+  - `2`: High
+  - `3`: Realtime
+</ParamField>
+
+<ParamField path="--poll" type="integer" default="50">
+  Polling level (0-100). `0` = no polling.
+</ParamField>
+
+### Cache Types
+
+```bash
+llama-bench -ctk f16 -ctv q8_0  # KV cache types
+```
+
+Options: `f32`, `f16`, `bf16`, `q8_0`, `q4_0`, `q4_1`, `iq4_nl`, `q5_0`, `q5_1`
+
+## Understanding Results
+
+### Tokens per Second (t/s)
+
+The primary metric showing throughput:
+
+- **Higher is better**
+- Format: `mean ± std_dev`
+- Example: `120.60 ± 0.59` means ~121 tokens/sec with low variance
+
+### Test Notation
+
+- **pp512**: Prompt processing with 512 tokens
+- **tg128**: Text generation of 128 tokens  
+- **pp512 @ d512**: Prompt processing at context depth 512
+
+<Note>
+  **Important**: llama-bench measurements do **not** include tokenization and sampling time. Real-world performance will be slightly lower.
+</Note>
+
+## Performance Analysis Tips
+
+<Steps>
+  <Step title="Baseline test">
+    Run with default settings to establish baseline:
+    
+    ```bash
+    llama-bench -m model.gguf -r 10
+    ```
+  </Step>
+  
+  <Step title="Identify bottlenecks">
+    Test with different configurations:
+    
+    - CPU vs GPU: `-ngl 0` vs `-ngl 99`
+    - Batch sizes: `-b 128,512,2048`
+    - Thread counts: `-t 4,8,16`
+  </Step>
+  
+  <Step title="Optimize settings">
+    Find the sweet spot for your hardware:
+    
+    - Balance GPU layers for your VRAM
+    - Adjust batch size for throughput vs latency
+    - Test Flash Attention: `-fa 0` vs `-fa 1`
+  </Step>
+</Steps>
+
+## Comparing Quantizations
+
+Benchmark different quantization levels:
+
+```bash
+llama-bench \
+  -m model-q4_0.gguf \
+  -m model-q4_k_m.gguf \
+  -m model-q5_k_m.gguf \
+  -m model-q6_k.gguf \
+  -m model-q8_0.gguf \
+  -o csv
+```
+
+Compare speed vs quality trade-offs.
+
+## See Also
+
+- [llama-cli](/api/tools/llama-cli) - Interactive CLI tool
+- [llama-perplexity](/api/tools/llama-perplexity) - Quality measurement tool
+- [Performance Tips](https://github.com/ggml-org/llama.cpp/blob/master/docs/development/token_generation_performance_tips.md)

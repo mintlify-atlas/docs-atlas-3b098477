@@ -1,0 +1,261 @@
+---
+title: REST API Overview
+description: Overview of the llama.cpp OpenAI-compatible REST API
+---
+
+The llama.cpp server provides a fast, lightweight REST API for LLM inference. It implements OpenAI-compatible endpoints, allowing you to use existing OpenAI client libraries with llama.cpp models.
+
+## Features
+
+- **OpenAI-compatible API**: Drop-in replacement for OpenAI's API endpoints
+- **High Performance**: Pure C/C++ implementation for maximum speed
+- **GPU Acceleration**: Support for CUDA, Metal, and other backends
+- **Streaming Responses**: Real-time token generation with Server-Sent Events
+- **Multiple Models**: Router mode for managing multiple models simultaneously
+- **Multimodal Support**: Vision and audio capabilities (experimental)
+- **Function Calling**: Tool use support for compatible models
+- **Flexible Deployment**: Docker, native binaries, or cloud platforms
+
+## Quick Start
+
+### Starting the Server
+
+<CodeGroup>
+```bash Unix/Linux/macOS
+./llama-server -m models/7B/ggml-model.gguf -c 2048
+```
+
+```powershell Windows
+llama-server.exe -m models\7B\ggml-model.gguf -c 2048
+```
+
+```bash Docker
+docker run -p 8080:8080 -v /path/to/models:/models \
+  ghcr.io/ggml-org/llama.cpp:server \
+  -m models/7B/ggml-model.gguf -c 512 --host 0.0.0.0 --port 8080
+```
+
+```bash Docker with CUDA
+docker run -p 8080:8080 -v /path/to/models:/models --gpus all \
+  ghcr.io/ggml-org/llama.cpp:server-cuda \
+  -m models/7B/ggml-model.gguf -c 512 --host 0.0.0.0 --port 8080 --n-gpu-layers 99
+```
+</CodeGroup>
+
+The server will start on `http://127.0.0.1:8080` by default.
+
+### Common Server Arguments
+
+<ParamField path="-m, --model" type="string" required>
+  Path to the model file (GGUF format)
+</ParamField>
+
+<ParamField path="-c, --ctx-size" type="number" default="0">
+  Size of the prompt context (0 = loaded from model)
+</ParamField>
+
+<ParamField path="-n, --predict" type="number" default="-1">
+  Number of tokens to predict (-1 = infinity)
+</ParamField>
+
+<ParamField path="-ngl, --n-gpu-layers" type="string" default="auto">
+  Number of layers to store in VRAM (auto, all, or specific number)
+</ParamField>
+
+<ParamField path="--host" type="string" default="127.0.0.1">
+  IP address to bind to
+</ParamField>
+
+<ParamField path="--port" type="number" default="8080">
+  Port to listen on
+</ParamField>
+
+<ParamField path="-np, --parallel" type="number" default="-1">
+  Number of parallel slots for concurrent requests (-1 = auto)
+</ParamField>
+
+<ParamField path="--api-key" type="string">
+  API key for authentication (can be comma-separated list for multiple keys)
+</ParamField>
+
+## Authentication
+
+To enable API key authentication, start the server with the `--api-key` flag:
+
+```bash
+llama-server -m models/model.gguf --api-key sk-your-secret-key
+```
+
+Then include the key in the Authorization header:
+
+```bash
+curl http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer sk-your-secret-key" \
+  -d '{...}'
+```
+
+<Note>
+Without `--api-key`, the server runs in open mode. The health endpoint (`/health`) is always public regardless of authentication settings.
+</Note>
+
+## Using with OpenAI Client Libraries
+
+The llama.cpp server is compatible with OpenAI's client libraries:
+
+<CodeGroup>
+```python Python
+import openai
+
+client = openai.OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key="sk-no-key-required"  # Use actual key if authentication enabled
+)
+
+completion = client.chat.completions.create(
+    model="gpt-3.5-turbo",
+    messages=[
+        {"role": "system", "content": "You are a helpful assistant."},
+        {"role": "user", "content": "Hello!"}
+    ]
+)
+
+print(completion.choices[0].message.content)
+```
+
+```javascript Node.js
+import OpenAI from 'openai';
+
+const client = new OpenAI({
+  baseURL: 'http://localhost:8080/v1',
+  apiKey: 'sk-no-key-required'
+});
+
+const completion = await client.chat.completions.create({
+  model: 'gpt-3.5-turbo',
+  messages: [
+    { role: 'system', content: 'You are a helpful assistant.' },
+    { role: 'user', content: 'Hello!' }
+  ]
+});
+
+console.log(completion.choices[0].message.content);
+```
+
+```bash cURL
+curl http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer sk-no-key-required" \
+  -d '{
+    "model": "gpt-3.5-turbo",
+    "messages": [
+      {"role": "system", "content": "You are a helpful assistant."},
+      {"role": "user", "content": "Hello!"}
+    ]
+  }'
+```
+</CodeGroup>
+
+## Available Endpoints
+
+### OpenAI-Compatible Endpoints
+
+- **[POST /v1/chat/completions](/api/rest/chat-completions)** - Chat-based text generation
+- **[POST /v1/completions](/api/rest/completions)** - Text completion
+- **[POST /v1/embeddings](/api/rest/embeddings)** - Generate text embeddings
+- **GET /v1/models** - List available models
+
+### Native llama.cpp Endpoints
+
+- **POST /completion** - Native completion endpoint (not OAI-compatible)
+- **POST /embedding** - Native embeddings endpoint (not OAI-compatible)
+- **POST /tokenize** - Tokenize text
+- **POST /detokenize** - Convert tokens to text
+- **GET /health** - Health check endpoint
+- **GET /props** - Server properties and configuration
+- **GET /slots** - Monitor slot status and performance
+
+### Additional Features
+
+- **POST /infill** - Code infilling for completion
+- **POST /reranking** - Document reranking
+- **GET /metrics** - Prometheus-compatible metrics (requires `--metrics` flag)
+
+## Model Configuration
+
+### Setting Model Alias
+
+By default, the model ID is the file path. You can set a custom alias:
+
+```bash
+llama-server -m models/model.gguf --alias gpt-4o-mini
+```
+
+Then use it in API requests:
+
+```json
+{
+  "model": "gpt-4o-mini",
+  "messages": [...]
+}
+```
+
+### Downloading Models from Hugging Face
+
+```bash
+llama-server -hf bartowski/Llama-3.3-70B-Instruct-GGUF:Q4_K_M
+```
+
+This automatically downloads the model and multimodal projector (if available).
+
+## Health Check
+
+Check if the server is ready:
+
+```bash
+curl http://localhost:8080/health
+```
+
+**Responses:**
+
+- `200 OK` with `{"status": "ok"}` - Server is ready
+- `503 Service Unavailable` with error message - Model is still loading
+
+## Environment Variables
+
+Many arguments can be configured via environment variables:
+
+```bash
+export LLAMA_ARG_MODEL=/path/to/model.gguf
+export LLAMA_ARG_CTX_SIZE=4096
+export LLAMA_ARG_N_GPU_LAYERS=99
+export LLAMA_API_KEY=sk-your-key
+
+llama-server
+```
+
+## Error Handling
+
+The server returns OpenAI-compatible error responses:
+
+```json
+{
+  "error": {
+    "code": 401,
+    "message": "Invalid API Key",
+    "type": "authentication_error"
+  }
+}
+```
+
+Common error types:
+- `authentication_error` - Invalid or missing API key
+- `invalid_request_error` - Malformed request
+- `unavailable_error` - Server not ready (model loading)
+- `not_supported_error` - Feature not enabled (e.g., metrics endpoint)
+
+## Next Steps
+
+- [Chat Completions API](/api/rest/chat-completions) - Interactive chat with models
+- [Completions API](/api/rest/completions) - Simple text completion
+- [Embeddings API](/api/rest/embeddings) - Generate vector embeddings

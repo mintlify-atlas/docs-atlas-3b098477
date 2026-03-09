@@ -1,0 +1,249 @@
+---
+title: GGUF File Format
+description: Understanding the GGUF binary file format used by llama.cpp
+---
+
+# GGUF File Format
+
+GGUF (GPT-Generated Unified Format) is the binary file format used by llama.cpp to store and distribute quantized language models. It's designed specifically for efficient loading and inference of large language models.
+
+## Overview
+
+GGUF files are self-contained binary files that include:
+- Model weights (tensors) in various quantized formats
+- Metadata as key-value pairs
+- Tensor descriptors with shape and type information
+- Optional alignment for efficient memory access
+
+<Note>
+GGUF is version 3 of the format, succeeding earlier GGML formats. It provides better extensibility and metadata support.
+</Note>
+
+## File Structure
+
+A GGUF file follows this precise structure:
+
+### 1. Header Section
+
+```c
+// File magic (4 bytes)
+"GGUF"
+
+// File version (uint32_t)
+3
+
+// Number of tensors (int64_t)
+n_tensors
+
+// Number of key-value pairs (int64_t)
+n_kv
+```
+
+### 2. Key-Value Metadata
+
+For each KV pair:
+1. **Key** (string): Metadata identifier
+2. **Value type** (gguf_type): Data type enum
+3. **Value data**: Binary representation
+
+For array types:
+1. Array element type
+2. Number of elements (uint64_t)
+3. Binary data for each element
+
+<Info>
+Common metadata keys include `general.architecture`, `general.name`, `general.alignment`, and model-specific hyperparameters like layer counts and dimensions.
+</Info>
+
+### 3. Tensor Descriptors
+
+For each tensor:
+1. **Tensor name** (string): e.g., "token_embd.weight"
+2. **Number of dimensions** (uint32_t)
+3. **Dimension sizes** (int64_t array): Shape of the tensor
+4. **Data type** (ggml_type): Quantization format
+5. **Data offset** (uint64_t): Position in the data blob
+
+### 4. Tensor Data Blob
+
+The actual tensor data, stored contiguously with optional alignment padding.
+
+<Note>
+The default alignment is 32 bytes (`GGUF_DEFAULT_ALIGNMENT`), but can be customized via the `general.alignment` metadata key.
+</Note>
+
+## Data Types
+
+GGUF supports multiple data types for metadata:
+
+```c
+enum gguf_type {
+    GGUF_TYPE_UINT8   = 0,
+    GGUF_TYPE_INT8    = 1,
+    GGUF_TYPE_UINT16  = 2,
+    GGUF_TYPE_INT16   = 3,
+    GGUF_TYPE_UINT32  = 4,
+    GGUF_TYPE_INT32   = 5,
+    GGUF_TYPE_FLOAT32 = 6,
+    GGUF_TYPE_BOOL    = 7,
+    GGUF_TYPE_STRING  = 8,
+    GGUF_TYPE_ARRAY   = 9,
+    GGUF_TYPE_UINT64  = 10,
+    GGUF_TYPE_INT64   = 11,
+    GGUF_TYPE_FLOAT64 = 12,
+};
+```
+
+<Warning>
+All enums are stored as `int32_t` and all boolean values as `int8_t`. Strings are serialized as length (uint64_t) followed by the characters without null terminator.
+</Warning>
+
+## Tensor Quantization Types
+
+GGUF files can store tensors in various quantization formats:
+
+- **Floating Point**: F32, F16, BF16
+- **K-Quants**: Q2_K, Q3_K, Q4_K, Q5_K, Q6_K, Q8_K
+- **I-Quants**: IQ1_S, IQ1_M, IQ2_XXS, IQ2_XS, IQ2_S, IQ2_M, IQ3_XXS, IQ3_XS, IQ3_S, IQ3_M, IQ4_XS, IQ4_NL
+- **Legacy**: Q4_0, Q4_1, Q5_0, Q5_1, Q8_0
+- **Experimental**: TQ1_0, TQ2_0, MXFP4
+
+See the [Quantization](/concepts/quantization) page for detailed information on each format.
+
+## Working with GGUF Files
+
+### Loading a GGUF File
+
+```c
+struct gguf_init_params params = {
+    .no_alloc = false,
+    .ctx = &ggml_ctx
+};
+
+struct gguf_context * ctx = gguf_init_from_file("model.gguf", params);
+```
+
+### Reading Metadata
+
+```c
+// Get number of KV pairs
+int64_t n_kv = gguf_get_n_kv(ctx);
+
+// Find a specific key
+int64_t key_id = gguf_find_key(ctx, "general.architecture");
+if (key_id != -1) {
+    const char * value = gguf_get_val_str(ctx, key_id);
+    printf("Architecture: %s\n", value);
+}
+```
+
+### Accessing Tensors
+
+```c
+// Get number of tensors
+int64_t n_tensors = gguf_get_n_tensors(ctx);
+
+// Find a specific tensor
+int64_t tensor_id = gguf_find_tensor(ctx, "token_embd.weight");
+if (tensor_id != -1) {
+    const char * name = gguf_get_tensor_name(ctx, tensor_id);
+    enum ggml_type type = gguf_get_tensor_type(ctx, tensor_id);
+    size_t offset = gguf_get_tensor_offset(ctx, tensor_id);
+}
+```
+
+## Writing GGUF Files
+
+There are three ways to write GGUF files:
+
+<Accordion title="Method 1: Single Pass Write">
+```c
+// Write entire file at once
+gguf_write_to_file(ctx, "model.gguf", false);
+```
+</Accordion>
+
+<Accordion title="Method 2: Metadata First, Then Data">
+```c
+// Write only metadata
+gguf_write_to_file(ctx, "model.gguf", true);
+
+// Append tensor data
+FILE * f = fopen("model.gguf", "ab");
+fwrite(f, tensor_data, size, 1);
+fclose(f);
+```
+</Accordion>
+
+<Accordion title="Method 3: Reserve Space, Write Data, Write Metadata">
+```c
+FILE * f = fopen("model.gguf", "wb");
+const size_t meta_size = gguf_get_meta_size(ctx);
+
+// Reserve space for metadata
+fseek(f, meta_size, SEEK_SET);
+
+// Write tensor data
+fwrite(f, tensor_data, size, 1);
+
+// Write metadata at beginning
+void * meta_data = malloc(meta_size);
+gguf_get_meta_data(ctx, meta_data);
+rewind(f);
+fwrite(meta_data, 1, meta_size, f);
+free(meta_data);
+fclose(f);
+```
+</Accordion>
+
+## Tools for Working with GGUF
+
+<CardGroup cols={2}>
+  <Card title="gguf-parser" icon="magnifying-glass">
+    Review and inspect GGUF files, estimate memory usage
+    ```bash
+    gguf-parser model.gguf
+    ```
+  </Card>
+  
+  <Card title="GGUF-my-repo" icon="wand-magic-sparkles">
+    Convert and quantize models to GGUF format on Hugging Face
+    [Visit Space](https://huggingface.co/spaces/ggml-org/gguf-my-repo)
+  </Card>
+  
+  <Card title="GGUF Editor" icon="pen-to-square">
+    Edit GGUF metadata in your browser
+    [Visit Space](https://huggingface.co/spaces/CISCai/gguf-editor)
+  </Card>
+  
+  <Card title="llama-quantize" icon="compress">
+    Convert and quantize GGUF files locally
+    ```bash
+    llama-quantize input.gguf output.gguf Q4_K_M
+    ```
+  </Card>
+</CardGroup>
+
+## Common Metadata Keys
+
+Key metadata found in GGUF files:
+
+- `general.architecture`: Model architecture (llama, falcon, gpt2, etc.)
+- `general.name`: Model name
+- `general.file_type`: Quantization type
+- `general.alignment`: Data alignment in bytes
+- `{arch}.context_length`: Maximum context length
+- `{arch}.embedding_length`: Embedding dimension
+- `{arch}.block_count`: Number of transformer layers
+- `{arch}.attention.head_count`: Number of attention heads
+- `tokenizer.ggml.model`: Tokenizer type (llama, gpt2, etc.)
+
+## Reference
+
+For the complete GGUF specification and API reference, see:
+- [gguf.h header file](https://github.com/ggml-org/llama.cpp/blob/master/ggml/include/gguf.h)
+- [GGML documentation](https://github.com/ggml-org/ggml/blob/master/docs/gguf.md)
+
+<Info>
+**Module Maintainer**: Johannes Gäßler (@JohannesGaessler, johannesg@5d6.de)
+</Info>

@@ -1,0 +1,460 @@
+---
+title: Quantizing Models
+description: Reduce model size and improve inference speed through quantization
+---
+
+Quantization reduces the precision of model weights, shrinking model size and speeding up inference with minimal quality loss. This is essential for running large language models on consumer hardware.
+
+## What is Quantization?
+
+Quantization converts high-precision model weights (32-bit or 16-bit floats) to lower precision formats (2-8 bits). For example:
+
+- **Original F32**: 26 GB for a 7B model
+- **F16**: 14 GB (50% reduction)
+- **Q4_K_M**: ~4.5 GB (83% reduction)
+- **Q2_K**: ~3 GB (88% reduction)
+
+The tradeoff is small accuracy loss, measured in perplexity (ppl). With proper quantization, this loss is often negligible.
+
+## Quick Start
+
+The `llama-quantize` tool converts GGUF models from high precision to quantized formats:
+
+<CodeGroup>
+```bash Basic Quantization
+# Quantize to Q4_K_M (recommended for most users)
+./llama-quantize model-f16.gguf model-q4.gguf Q4_K_M
+
+# Quantize to Q5_K_M (higher quality)
+./llama-quantize model-f16.gguf model-q5.gguf Q5_K_M
+
+# Quantize to Q8_0 (near-original quality)
+./llama-quantize model-f16.gguf model-q8.gguf Q8_0
+```
+
+```bash With Threads
+# Use multiple CPU threads for faster quantization
+./llama-quantize model-f16.gguf model-q4.gguf Q4_K_M 8
+
+# Auto-output filename (will be model-q4.gguf)
+./llama-quantize model-f16.gguf q4_k_m 8
+```
+</CodeGroup>
+
+## Quantization Types
+
+llama.cpp supports many quantization methods. Here are the most important ones:
+
+### Recommended Quantization Levels
+
+<Accordion title="Q4_K_M - Best Balance (Recommended)">
+**Size**: ~4.5 GB for 7B model  
+**Quality**: +0.18 ppl @ Llama-3-8B  
+**Speed**: Fast inference
+
+**Best for**: Most users, production deployments, good quality-to-size ratio
+
+```bash
+./llama-quantize model-f16.gguf model-q4km.gguf Q4_K_M
+```
+
+This is the default recommendation for most use cases.
+</Accordion>
+
+<Accordion title="Q5_K_M - Higher Quality">
+**Size**: ~5.3 GB for 7B model  
+**Quality**: +0.06 ppl @ Llama-3-8B  
+**Speed**: Slightly slower than Q4
+
+**Best for**: When quality is more important than size, users with more RAM
+
+```bash
+./llama-quantize model-f16.gguf model-q5km.gguf Q5_K_M
+```
+
+Noticeably better quality than Q4 with only ~20% size increase.
+</Accordion>
+
+<Accordion title="Q8_0 - Near Original">
+**Size**: ~8 GB for 7B model  
+**Quality**: +0.003 ppl @ Llama-3-8B  
+**Speed**: Moderate
+
+**Best for**: When maximum quality is needed, enough RAM available
+
+```bash
+./llama-quantize model-f16.gguf model-q8.gguf Q8_0
+```
+
+Minimal quality loss compared to F16, good for validation.
+</Accordion>
+
+<Accordion title="Q2_K / Q3_K - Smallest Size">
+**Q2_K Size**: ~3 GB for 7B model (+3.5 ppl)  
+**Q3_K_M Size**: ~3.7 GB for 7B model (+0.7 ppl)  
+**Speed**: Very fast
+
+**Best for**: Very limited RAM, mobile devices, when size is critical
+
+```bash
+./llama-quantize model-f16.gguf model-q2k.gguf Q2_K
+./llama-quantize model-f16.gguf model-q3k.gguf Q3_K_M
+```
+
+Noticeable quality degradation but still functional.
+</Accordion>
+
+### Complete Quantization List
+
+For reference, here's the complete list of supported quantization types:
+
+| Type | Bits/Weight | Size (7B) | Perplexity | Description |
+|------|-------------|-----------|------------|--------------|
+| IQ1_S | 1.56 | ~1.5 GB | - | Experimental 1-bit |
+| IQ1_M | 1.75 | ~1.7 GB | - | 1-bit variant |
+| IQ2_XXS | 2.06 | ~2.0 GB | - | Ultra-compressed |
+| IQ2_XS | 2.31 | ~2.2 GB | - | 2-bit extra-small |
+| IQ2_S | 2.50 | ~2.4 GB | - | 2-bit small |
+| IQ2_M | 2.70 | ~2.6 GB | - | 2-bit medium |
+| Q2_K | 2.96 | ~2.8 GB | +3.52 | 2-bit k-quant |
+| Q2_K_S | 2.96 | ~2.8 GB | +3.18 | 2-bit k-quant small |
+| IQ3_XXS | 3.06 | ~2.9 GB | - | 3-bit ultra-small |
+| IQ3_XS | 3.30 | ~3.1 GB | - | 3-bit extra-small |
+| IQ3_S | 3.44 | ~3.2 GB | - | 3-bit small |
+| Q3_K_S | 3.41 | ~3.2 GB | +1.63 | 3-bit k-quant small |
+| IQ3_M | 3.66 | ~3.5 GB | - | 3-bit medium mix |
+| Q3_K_M | 3.74 | ~3.5 GB | +0.66 | **3-bit balanced** |
+| Q3_K_L | 4.03 | ~3.8 GB | +0.56 | 3-bit large |
+| IQ4_XS | 4.25 | ~4.0 GB | - | 4-bit extra-small |
+| Q4_0 | 4.34 | ~4.1 GB | +0.47 | Legacy 4-bit |
+| IQ4_NL | 4.50 | ~4.3 GB | - | 4-bit non-linear |
+| Q4_1 | 4.78 | ~4.5 GB | +0.45 | Legacy 4-bit variant |
+| Q4_K_S | 4.37 | ~4.1 GB | +0.27 | 4-bit k-quant small |
+| Q4_K_M | 4.58 | ~4.3 GB | +0.18 | **4-bit balanced** ⭐ |
+| Q5_0 | 5.21 | ~4.9 GB | +0.13 | Legacy 5-bit |
+| Q5_1 | 5.65 | ~5.3 GB | +0.11 | Legacy 5-bit variant |
+| Q5_K_S | 5.21 | ~4.9 GB | +0.10 | 5-bit k-quant small |
+| Q5_K_M | 5.33 | ~5.0 GB | +0.06 | **5-bit balanced** |
+| Q6_K | 6.14 | ~5.8 GB | +0.02 | 6-bit k-quant |
+| Q8_0 | 8.50 | ~8.0 GB | +0.003 | 8-bit quantization |
+| F16 | 16.00 | ~14 GB | +0.002 | Half precision |
+| BF16 | 16.00 | ~14 GB | -0.005 | BFloat16 |
+| F32 | 32.00 | ~26 GB | baseline | Full precision |
+
+<Note>
+Perplexity values are from Llama-3-8B benchmarks. Lower perplexity increase = better quality. The "K" variants (Q4_K_M, Q5_K_M) use importance matrix techniques for better quality.
+</Note>
+
+## Advanced Quantization
+
+### Using Importance Matrix (imatrix)
+
+Importance matrix quantization uses statistical data from real prompts to minimize quality loss:
+
+<Steps>
+  <Step title="Generate Importance Matrix">
+    First, create an imatrix file by running text through the model:
+    
+    ```bash
+    # Generate imatrix from a text file
+    ./llama-imatrix -m model-f16.gguf -f calibration-data.txt -o imatrix.dat
+    ```
+    
+    The calibration data should be representative of your actual use case.
+  </Step>
+  
+  <Step title="Quantize with imatrix">
+    Use the imatrix during quantization for better results:
+    
+    ```bash
+    ./llama-quantize --imatrix imatrix.dat model-f16.gguf model-q4.gguf Q4_K_M
+    ```
+    
+    This typically reduces perplexity by 10-30% compared to naive quantization.
+  </Step>
+</Steps>
+
+<Note>
+Using an importance matrix is **highly recommended** for quantization levels below Q5_K_M, as it significantly improves quality.
+</Note>
+
+### Advanced Options
+
+<Accordion title="Selective Tensor Quantization">
+Quantize different parts of the model to different levels:
+
+```bash
+# Keep attention layers at higher precision
+./llama-quantize \
+  --tensor-type "attn_v=q5_k" \
+  --tensor-type "attn_q=q5_k" \
+  model-f16.gguf model-mixed.gguf Q4_K_M
+```
+
+Useful for preserving quality in critical layers while saving size elsewhere.
+</Accordion>
+
+<Accordion title="Output Tensor Control">
+Control quantization of the output projection:
+
+```bash
+# Leave output tensor unquantized for better quality
+./llama-quantize --leave-output-tensor model-f16.gguf model-q4.gguf Q4_K_M
+
+# Or use specific quantization for output
+./llama-quantize --output-tensor-type q6_k model-f16.gguf model-q4.gguf Q4_K_M
+```
+
+The output tensor significantly affects generation quality.
+</Accordion>
+
+<Accordion title="Token Embedding Control">
+Special quantization for token embeddings:
+
+```bash
+# Use Q3_K for embeddings to save size
+./llama-quantize --token-embedding-type q3_k model-f16.gguf model-q4.gguf Q4_K_M
+```
+
+Embeddings can often be more aggressively quantized.
+</Accordion>
+
+<Accordion title="Pure Quantization">
+Quantize all tensors to the exact same type:
+
+```bash
+# No mixed precision - everything becomes Q4_K
+./llama-quantize --pure model-f16.gguf model-q4.gguf Q4_K
+```
+
+By default, some tensors use different quantization for quality. `--pure` disables this.
+</Accordion>
+
+### Requantization
+
+You can requantize an already-quantized model, though quality loss accumulates:
+
+```bash
+# Requantize Q4 to Q5 (not recommended - better to start from F16)
+./llama-quantize --allow-requantize model-q4.gguf model-q5.gguf Q5_K_M
+```
+
+<Note>
+**Warning**: Requantization severely degrades quality. Always quantize from F16 or F32 when possible.
+</Note>
+
+## Complete Workflow Example
+
+Here's a complete example from raw model to optimized GGUF:
+
+<CodeGroup>
+```bash Standard Workflow
+# 1. Download model from Hugging Face
+huggingface-cli download meta-llama/Llama-3.1-8B \
+  --local-dir ./models/llama-3.1-8b
+
+# 2. Install dependencies
+cd llama.cpp
+python3 -m pip install -r requirements.txt
+
+# 3. Convert to GGUF F16
+python3 convert_hf_to_gguf.py ../models/llama-3.1-8b/
+
+# 4. Quantize to Q4_K_M
+./llama-quantize \
+  ../models/llama-3.1-8b/ggml-model-f16.gguf \
+  ../models/llama-3.1-8b/ggml-model-Q4_K_M.gguf \
+  Q4_K_M
+
+# 5. Run the quantized model
+./llama-cli -m ../models/llama-3.1-8b/ggml-model-Q4_K_M.gguf \
+  -p "You are a helpful assistant" -cnv
+```
+
+```bash With Importance Matrix
+# 1-3. Same as above...
+
+# 4. Generate importance matrix
+./llama-imatrix \
+  -m ../models/llama-3.1-8b/ggml-model-f16.gguf \
+  -f calibration.txt \
+  -o imatrix.dat
+
+# 5. Quantize with imatrix
+./llama-quantize \
+  --imatrix imatrix.dat \
+  ../models/llama-3.1-8b/ggml-model-f16.gguf \
+  ../models/llama-3.1-8b/ggml-model-Q4_K_M.gguf \
+  Q4_K_M
+
+# 6. Test quality improvement
+./llama-perplexity \
+  -m ../models/llama-3.1-8b/ggml-model-Q4_K_M.gguf \
+  -f test-data.txt
+```
+</CodeGroup>
+
+## Memory and Disk Requirements
+
+Quantization requires enough memory and disk space for both input and output files:
+
+| Model Size | F16 Input | Q4_K_M Output | RAM Needed | Time (approx) |
+|------------|-----------|---------------|------------|---------------|
+| 1B | 2 GB | 0.7 GB | 4 GB | &lt;1 min |
+| 7B | 14 GB | 4.5 GB | 16 GB | 2-5 min |
+| 13B | 26 GB | 8 GB | 32 GB | 5-10 min |
+| 34B | 68 GB | 21 GB | 80 GB | 15-30 min |
+| 70B | 140 GB | 43 GB | 160 GB | 30-60 min |
+| 405B | 810 GB | 249 GB | 1 TB | 2-4 hours |
+
+<Note>
+You need enough disk space for both the input and output files simultaneously. RAM usage is typically close to the output file size.
+</Note>
+
+## Online Quantization
+
+If you don't have sufficient hardware, use the [GGUF-my-repo](https://huggingface.co/spaces/ggml-org/gguf-my-repo) Hugging Face space:
+
+1. Visit https://huggingface.co/spaces/ggml-org/gguf-my-repo
+2. Enter your model repository
+3. Select quantization levels (multiple at once)
+4. The space converts and quantizes automatically
+5. Results are published to your Hugging Face account
+
+This is free and uses Hugging Face's infrastructure.
+
+## Choosing the Right Quantization
+
+### Decision Tree
+
+<Steps>
+  <Step title="Determine Your Constraints">
+    **RAM/VRAM available?**
+    - &lt;8 GB: Use Q2_K or Q3_K_M
+    - 8-16 GB: Use Q4_K_M
+    - 16-32 GB: Use Q5_K_M or Q6_K
+    - 32+ GB: Use Q8_0 or F16
+  </Step>
+  
+  <Step title="Assess Quality Needs">
+    **How important is quality?**
+    - Maximum quality: Q8_0 or F16
+    - High quality: Q5_K_M or Q6_K
+    - Balanced: Q4_K_M ⭐
+    - Size-constrained: Q3_K_M
+    - Extreme compression: Q2_K
+  </Step>
+  
+  <Step title="Consider Use Case">
+    **What's your use case?**
+    - Production/chat: Q4_K_M or Q5_K_M
+    - Development/testing: Q4_K_M
+    - Mobile/edge: Q2_K or Q3_K_M
+    - Research/benchmarking: Q8_0 or F16
+  </Step>
+</Steps>
+
+### Recommendations by Model Size
+
+<Accordion title="Small Models (1B-3B)">
+**Recommended**: Q4_K_M or Q5_K_M
+
+Small models are already efficient, so use higher quantization to preserve quality. The size savings from aggressive quantization aren't as meaningful.
+
+```bash
+./llama-quantize model-1b-f16.gguf model-1b-q5.gguf Q5_K_M
+```
+</Accordion>
+
+<Accordion title="Medium Models (7B-13B)">
+**Recommended**: Q4_K_M
+
+This is the sweet spot for Q4_K_M quantization. You get ~75% size reduction with minimal quality loss.
+
+```bash
+./llama-quantize model-7b-f16.gguf model-7b-q4.gguf Q4_K_M
+```
+</Accordion>
+
+<Accordion title="Large Models (30B-70B)">
+**Recommended**: Q3_K_M or Q4_K_M
+
+Size becomes critical for large models. Q3_K_M provides good compression while maintaining usable quality.
+
+```bash
+./llama-quantize model-70b-f16.gguf model-70b-q3.gguf Q3_K_M
+```
+
+Use Q4_K_M if you have the RAM.
+</Accordion>
+
+<Accordion title="Huge Models (100B+)">
+**Recommended**: Q2_K or Q3_K_M
+
+For models this large, aggressive quantization is often necessary just to fit in memory.
+
+```bash
+./llama-quantize model-405b-f16.gguf model-405b-q2.gguf Q2_K
+```
+
+Consider using importance matrix to improve Q2_K quality.
+</Accordion>
+
+## Evaluating Quality
+
+Measure quantization quality using perplexity:
+
+```bash
+# Test on a validation dataset
+./llama-perplexity -m model-q4.gguf -f validation.txt
+
+# Compare to original
+./llama-perplexity -m model-f16.gguf -f validation.txt
+```
+
+Lower perplexity = better quality. A small increase (0.1-0.5) is usually acceptable.
+
+## Troubleshooting
+
+<Accordion title="Out of memory during quantization">
+**Solution**: Use a smaller quantization level or quantize on a machine with more RAM. Alternatively, use the online [GGUF-my-repo](https://huggingface.co/spaces/ggml-org/gguf-my-repo) tool.
+</Accordion>
+
+<Accordion title="Quantized model gives nonsensical output">
+**Possible causes**:
+- Quantization level too aggressive (Q2_K or lower)
+- Corrupted quantization process
+- Wrong model format
+
+**Solution**: Try Q4_K_M or higher, or requantize from original F16.
+</Accordion>
+
+<Accordion title="Cannot requantize an already quantized model">
+**Error message**: `error: quantizing already quantized model`
+
+**Solution**: Add `--allow-requantize` flag, but note this degrades quality. Better to quantize from F16.
+</Accordion>
+
+<Accordion title="Quantization is very slow">
+**Solution**: Use more CPU threads:
+
+```bash
+./llama-quantize model.gguf output.gguf Q4_K_M 16
+```
+
+The last argument specifies thread count.
+</Accordion>
+
+## Next Steps
+
+After quantization:
+
+1. **Test the model** to ensure quality is acceptable
+2. **Benchmark performance** with `llama-bench`
+3. **Deploy** using `llama-server` or integrate into your application
+4. **Share** your quantized model on Hugging Face for others
+
+See also:
+- [Supported Models](/models/supported-models) - Check compatibility
+- [Converting Models](/models/converting-models) - Get models into GGUF format
+- [Obtaining Models](/models/obtaining-models) - Find pre-quantized models

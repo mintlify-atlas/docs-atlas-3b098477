@@ -1,0 +1,435 @@
+---
+title: Chat Completions
+description: OpenAI-compatible chat completions endpoint
+---
+
+The `/v1/chat/completions` endpoint provides conversational AI capabilities using a chat message format. It's fully compatible with OpenAI's Chat Completions API.
+
+## Endpoint
+
+```
+POST /v1/chat/completions
+```
+
+## Request Format
+
+### Required Parameters
+
+<ParamField path="model" type="string" required>
+  Model identifier. Can be the model path, alias (set via `--alias`), or any string when using a single model.
+</ParamField>
+
+<ParamField path="messages" type="array" required>
+  Array of message objects representing the conversation history. Each message has:
+  - `role` (string): One of `system`, `user`, or `assistant`
+  - `content` (string): The message content
+  
+  For multimodal models, `content` can be an array with text and image parts.
+</ParamField>
+
+### Optional Parameters
+
+<ParamField path="temperature" type="number" default="0.8">
+  Sampling temperature between 0 and 2. Higher values make output more random, lower values more deterministic.
+</ParamField>
+
+<ParamField path="top_p" type="number" default="0.95">
+  Nucleus sampling parameter. Only tokens with cumulative probability up to `top_p` are considered.
+</ParamField>
+
+<ParamField path="top_k" type="number" default="40">
+  Limits token selection to the K most probable tokens. Set to 0 to disable.
+</ParamField>
+
+<ParamField path="min_p" type="number" default="0.05">
+  Minimum probability threshold relative to the most likely token.
+</ParamField>
+
+<ParamField path="max_tokens" type="number" default="-1">
+  Maximum number of tokens to generate. -1 means unlimited.
+</ParamField>
+
+<ParamField path="stream" type="boolean" default="false">
+  Whether to stream partial message deltas using Server-Sent Events.
+</ParamField>
+
+<ParamField path="stop" type="array">
+  Array of strings. Generation stops when any of these sequences are encountered.
+</ParamField>
+
+<ParamField path="presence_penalty" type="number" default="0.0">
+  Penalize tokens based on whether they appear in the text so far. Range: -2.0 to 2.0.
+</ParamField>
+
+<ParamField path="frequency_penalty" type="number" default="0.0">
+  Penalize tokens based on their frequency in the text. Range: -2.0 to 2.0.
+</ParamField>
+
+<ParamField path="repeat_penalty" type="number" default="1.1">
+  Penalize repetition of token sequences.
+</ParamField>
+
+<ParamField path="seed" type="number" default="-1">
+  Random seed for reproducible outputs. Use -1 for random.
+</ParamField>
+
+<ParamField path="response_format" type="object">
+  Control output format:
+  - `{"type": "json_object"}` - Force valid JSON output
+  - `{"type": "json_schema", "schema": {...}}` - Constrain to JSON schema
+</ParamField>
+
+<ParamField path="tools" type="array">
+  Array of tool/function definitions for function calling. Requires `--jinja` flag.
+</ParamField>
+
+<ParamField path="tool_choice" type="string | object">
+  Control tool selection: `auto`, `none`, or `{"type": "function", "function": {"name": "tool_name"}}`
+</ParamField>
+
+### llama.cpp-Specific Parameters
+
+<ParamField path="mirostat" type="number" default="0">
+  Enable Mirostat sampling. 0 = disabled, 1 = Mirostat 1.0, 2 = Mirostat 2.0
+</ParamField>
+
+<ParamField path="mirostat_tau" type="number" default="5.0">
+  Mirostat target entropy (τ parameter).
+</ParamField>
+
+<ParamField path="mirostat_eta" type="number" default="0.1">
+  Mirostat learning rate (η parameter).
+</ParamField>
+
+<ParamField path="reasoning_format" type="string" default="auto">
+  Controls reasoning/thinking tags:
+  - `none` - No parsing, raw output in content
+  - `deepseek` - Extract thoughts to `reasoning_content` field
+  - `deepseek-legacy` - Keep tags in content while populating `reasoning_content`
+</ParamField>
+
+<ParamField path="thinking_forced_open" type="boolean" default="false">
+  Force reasoning models to always output thinking process.
+</ParamField>
+
+<ParamField path="cache_prompt" type="boolean" default="true">
+  Reuse KV cache from previous requests when possible for faster processing.
+</ParamField>
+
+## Request Examples
+
+<CodeGroup>
+```bash Basic Chat
+curl http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer no-key" \
+  -d '{
+    "model": "gpt-3.5-turbo",
+    "messages": [
+      {"role": "system", "content": "You are a helpful assistant."},
+      {"role": "user", "content": "What is the capital of France?"}
+    ],
+    "temperature": 0.7,
+    "max_tokens": 100
+  }'
+```
+
+```python Python Client
+import openai
+
+client = openai.OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key="sk-no-key-required"
+)
+
+response = client.chat.completions.create(
+    model="gpt-3.5-turbo",
+    messages=[
+        {"role": "system", "content": "You are a helpful assistant."},
+        {"role": "user", "content": "What is the capital of France?"}
+    ],
+    temperature=0.7,
+    max_tokens=100
+)
+
+print(response.choices[0].message.content)
+```
+
+```bash Streaming Response
+curl http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer no-key" \
+  -d '{
+    "model": "gpt-3.5-turbo",
+    "messages": [
+      {"role": "user", "content": "Write a haiku about programming"}
+    ],
+    "stream": true
+  }'
+```
+
+```bash JSON Mode
+curl http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-3.5-turbo",
+    "messages": [
+      {"role": "user", "content": "List 3 colors in JSON format"}
+    ],
+    "response_format": {"type": "json_object"}
+  }'
+```
+
+```bash Multimodal (Vision)
+curl http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "llava",
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+          {"type": "text", "text": "What is in this image?"},
+          {
+            "type": "image_url",
+            "image_url": {
+              "url": "https://example.com/image.jpg"
+            }
+          }
+        ]
+      }
+    ]
+  }'
+```
+</CodeGroup>
+
+## Response Format
+
+### Standard Response
+
+<ResponseField name="id" type="string">
+  Unique identifier for the completion.
+</ResponseField>
+
+<ResponseField name="object" type="string">
+  Always `"chat.completion"` for non-streaming responses.
+</ResponseField>
+
+<ResponseField name="created" type="number">
+  Unix timestamp of when the completion was created.
+</ResponseField>
+
+<ResponseField name="model" type="string">
+  The model used for the completion.
+</ResponseField>
+
+<ResponseField name="choices" type="array">
+  Array of completion choices. Each choice contains:
+  - `index` (number) - Choice index
+  - `message` (object) - The generated message with `role` and `content`
+  - `finish_reason` (string) - Why generation stopped: `stop`, `length`, or `tool_calls`
+  - `logprobs` (object | null) - Token probabilities if requested
+</ResponseField>
+
+<ResponseField name="usage" type="object">
+  Token usage statistics:
+  - `prompt_tokens` (number) - Tokens in the prompt
+  - `completion_tokens` (number) - Tokens generated
+  - `total_tokens` (number) - Sum of prompt and completion tokens
+</ResponseField>
+
+<ResponseField name="timings" type="object">
+  Performance metrics (llama.cpp specific):
+  - `prompt_n` (number) - Prompt tokens processed
+  - `prompt_ms` (number) - Time spent on prompt
+  - `predicted_n` (number) - Tokens generated
+  - `predicted_ms` (number) - Time spent generating
+  - `cache_n` (number) - Tokens reused from cache
+</ResponseField>
+
+### Example Response
+
+```json
+{
+  "id": "chatcmpl-abc123",
+  "object": "chat.completion",
+  "created": 1677652288,
+  "model": "gpt-3.5-turbo",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "The capital of France is Paris. It has been the capital since 987 AD and is known for landmarks like the Eiffel Tower and the Louvre Museum."
+      },
+      "finish_reason": "stop",
+      "logprobs": null
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 28,
+    "completion_tokens": 34,
+    "total_tokens": 62
+  },
+  "timings": {
+    "prompt_n": 28,
+    "prompt_ms": 145.2,
+    "prompt_per_token_ms": 5.186,
+    "prompt_per_second": 192.8,
+    "predicted_n": 34,
+    "predicted_ms": 682.5,
+    "predicted_per_token_ms": 20.074,
+    "predicted_per_second": 49.8,
+    "cache_n": 0
+  }
+}
+```
+
+## Streaming Responses
+
+When `stream: true`, the server sends Server-Sent Events (SSE):
+
+```
+data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1677652288,"model":"gpt-3.5-turbo","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1677652288,"model":"gpt-3.5-turbo","choices":[{"index":0,"delta":{"content":"The"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1677652288,"model":"gpt-3.5-turbo","choices":[{"index":0,"delta":{"content":" capital"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1677652288,"model":"gpt-3.5-turbo","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+data: [DONE]
+```
+
+## Function Calling
+
+To enable function calling, start the server with `--jinja`:
+
+```bash
+llama-server -m model.gguf --jinja
+```
+
+Then define tools in your request:
+
+```json
+{
+  "model": "gpt-3.5-turbo",
+  "messages": [
+    {"role": "user", "content": "What's the weather in Boston?"}
+  ],
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "get_weather",
+        "description": "Get the current weather for a location",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "location": {
+              "type": "string",
+              "description": "The city and state, e.g. San Francisco, CA"
+            },
+            "unit": {
+              "type": "string",
+              "enum": ["celsius", "fahrenheit"]
+            }
+          },
+          "required": ["location"]
+        }
+      }
+    }
+  ],
+  "tool_choice": "auto"
+}
+```
+
+The model will respond with tool calls:
+
+```json
+{
+  "choices": [
+    {
+      "message": {
+        "role": "assistant",
+        "content": null,
+        "tool_calls": [
+          {
+            "id": "call_abc123",
+            "type": "function",
+            "function": {
+              "name": "get_weather",
+              "arguments": "{\"location\": \"Boston, MA\", \"unit\": \"fahrenheit\"}"
+            }
+          }
+        ]
+      },
+      "finish_reason": "tool_calls"
+    }
+  ]
+}
+```
+
+## Reasoning Models
+
+For models with reasoning capabilities (e.g., DeepSeek-R1), thoughts are extracted to `reasoning_content`:
+
+```json
+{
+  "choices": [
+    {
+      "message": {
+        "role": "assistant",
+        "content": "The answer is 42.",
+        "reasoning_content": "Let me think about this step by step..."
+      },
+      "finish_reason": "stop"
+    }
+  ]
+}
+```
+
+<Note>
+Set `reasoning_format: "none"` to get raw output without reasoning extraction.
+</Note>
+
+## Multi-turn Conversations
+
+Include the full conversation history in the `messages` array:
+
+```json
+{
+  "model": "gpt-3.5-turbo",
+  "messages": [
+    {"role": "system", "content": "You are a helpful math tutor."},
+    {"role": "user", "content": "What is 2 + 2?"},
+    {"role": "assistant", "content": "2 + 2 equals 4."},
+    {"role": "user", "content": "What about 2 + 3?"}
+  ]
+}
+```
+
+## Performance Tips
+
+1. **Enable prompt caching**: Set `cache_prompt: true` (default) to reuse KV cache across requests
+2. **Use streaming**: Enable `stream: true` for better perceived latency
+3. **Adjust context size**: Use `-c` flag to set appropriate context window for your use case
+4. **GPU acceleration**: Use `--n-gpu-layers` to offload layers to GPU
+5. **Parallel requests**: Use `--parallel` to handle multiple concurrent requests
+
+## Error Responses
+
+```json
+{
+  "error": {
+    "message": "Invalid request: messages is required",
+    "type": "invalid_request_error",
+    "code": 400
+  }
+}
+```
+
+Common error codes:
+- `400` - Invalid request (missing/invalid parameters)
+- `401` - Authentication failed
+- `503` - Server unavailable (model still loading)

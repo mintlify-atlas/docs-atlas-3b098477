@@ -1,0 +1,474 @@
+---
+title: "Grammars (GBNF)"
+description: "Constrain model outputs with formal grammars using GBNF"
+---
+
+# Grammars (GBNF)
+
+GBNF (GGML BNF) allows you to define [formal grammars](https://en.wikipedia.org/wiki/Formal_grammar) to constrain model outputs in llama.cpp.
+
+## What is GBNF?
+
+GBNF is an extension of [Backus-Naur Form (BNF)](https://en.wikipedia.org/wiki/Backus%E2%80%93Naur_form) with regex-like features for defining syntax rules.
+
+**Use cases:**
+- Force valid JSON output
+- Generate code in specific languages
+- Ensure structured responses (chess notation, math equations)
+- Constrain outputs to specific formats (dates, emails, URLs)
+- Create domain-specific languages
+
+## Quick Start
+
+### Use Built-in Grammars
+
+llama.cpp includes example grammars in the `grammars/` directory:
+
+<CodeGroup>
+```bash JSON
+llama-cli -m model.gguf \
+  --grammar-file grammars/json.gbnf \
+  -p "Generate a user profile:"
+```
+
+```bash JSON Array
+llama-cli -m model.gguf \
+  --grammar-file grammars/json_arr.gbnf \
+  -p "List three colors:"
+```
+
+```bash Chess Notation
+llama-cli -m model.gguf \
+  --grammar-file grammars/chess.gbnf \
+  -p "A chess game:"
+```
+</CodeGroup>
+
+### JSON Schema
+
+Generate grammar from JSON schema:
+
+```python
+from examples import json_schema_to_grammar
+
+schema = {
+    "type": "object",
+    "properties": {
+        "name": {"type": "string"},
+        "age": {"type": "integer"},
+        "email": {"type": "string", "format": "email"}
+    },
+    "required": ["name", "age"]
+}
+
+grammar = json_schema_to_grammar.json_schema_to_gbnf(json.dumps(schema))
+print(grammar)
+```
+
+Or use the online tool: [grammar.intrinsiclabs.ai](https://grammar.intrinsiclabs.ai/)
+
+## GBNF Syntax
+
+### Basic Structure
+
+GBNF defines **production rules** that specify how non-terminals (rule names) can be replaced with sequences of terminals (characters) and other non-terminals:
+
+```gbnf
+rule-name ::= sequence of terminals and non-terminals
+```
+
+### Simple Example
+
+```gbnf
+# Root rule defines overall pattern
+root ::= "Hello, " name "!"
+
+# Name must be capitalized word
+name ::= [A-Z] [a-z]+
+```
+
+This grammar matches: "Hello, Alice!", "Hello, Bob!", etc.
+
+### Chess Notation Example
+
+From `grammars/chess.gbnf`:
+
+```gbnf
+# Root specifies the overall output pattern
+root ::= (
+    # Starts with "1. " followed by two moves
+    "1. " move " " move "\n"
+    
+    # Followed by subsequent numbered moves
+    ([1-9] [0-9]? ". " move " " move "\n")+
+)
+
+# Move can be pawn, piece, or castling
+move ::= (pawn | nonpawn | castle) [+#]?
+
+pawn ::= [a-h] [1-8] | [a-h] "x" [a-h] [1-8]
+nonpawn ::= [NBKQR] [a-h]? [1-8]? "x"? [a-h] [1-8]
+castle ::= "O-O" | "O-O-O"
+```
+
+## Core Concepts
+
+### Non-Terminals
+
+Rule names (must be lowercase with dashes):
+
+```gbnf
+sentence ::= subject " " verb " " object
+subject ::= "I" | "You" | "They"
+verb ::= "love" | "hate" | "like"
+object ::= "cats" | "dogs" | "birds"
+```
+
+### Terminals
+
+Actual characters or character ranges:
+
+```gbnf
+# Literal strings
+greeting ::= "Hello" | "Hi" | "Hey"
+
+# Character ranges
+digit ::= [0-9]
+lowercase ::= [a-z]
+uppercase ::= [A-Z]
+
+# Unicode support
+hiragana ::= [ぁ-ゟ]
+```
+
+### Character Escapes
+
+```gbnf
+# 8-bit: \xXX
+control ::= "\x00" | "\x1A"
+
+# 16-bit: \uXXXX
+quote ::= "\u201C" | "\u201D"
+
+# 32-bit: \UXXXXXXXX
+emoji ::= "\U0001F600" | "\U0001F602"
+```
+
+### Negation
+
+```gbnf
+# Everything except newline
+single-line ::= [^\n]+ "\n"
+
+# Non-digit characters
+non-digit ::= [^0-9]
+```
+
+## Operators
+
+### Repetition
+
+```gbnf
+# Zero or more (equivalent to {0,})
+optional-spaces ::= " "*
+
+# One or more (equivalent to {1,})
+required-spaces ::= " "+
+
+# Optional (equivalent to {0,1})
+minus-sign ::= "-"?
+
+# Exact count
+zip-code ::= [0-9]{5}
+
+# Range
+age ::= [0-9]{1,3}
+
+# At least m times
+long-text ::= [a-z]{100,}
+
+# At most n times
+short-code ::= [A-Z]{0,4}
+```
+
+### Alternatives
+
+```gbnf
+# Simple alternatives
+answer ::= "yes" | "no" | "maybe"
+
+# Complex alternatives with grouping
+date ::= month "/" day "/" year
+month ::= ("0" [1-9]) | ("1" [0-2])
+day ::= ([0-2] [0-9]) | ("3" [0-1])
+year ::= [0-9]{4}
+```
+
+### Grouping
+
+```gbnf
+# Parentheses for grouping
+url ::= "http" "s"? "://" domain ("/" path)?
+
+# Apply repetition to groups
+repeating-group ::= ("ha" " ")+
+```
+
+## Advanced Features
+
+### Token Matching
+
+Match specific tokenizer tokens (useful for special tokens):
+
+```gbnf
+# Token ID
+special ::= <[1000]> content <[1001]>
+
+# Token string (if it's a single token)
+thinking ::= <think> content </think>
+
+# Negation - match any token except specified
+content ::= !<[1001]>*
+```
+
+**Example:**
+
+```gbnf
+# Match thinking blocks
+root ::= <think> thinking </think> .*
+thinking ::= !</think>*
+```
+
+### Comments
+
+```gbnf
+# This is a comment
+root ::= value
+
+# Comments can explain complex rules
+value ::= number | string  # or other types
+```
+
+## Practical Examples
+
+### Email Addresses
+
+```gbnf
+root ::= email
+
+email ::= local "@" domain
+local ::= [a-zA-Z0-9._+-]+
+domain ::= subdomain ("." subdomain)* "." tld
+subdomain ::= [a-zA-Z0-9-]+
+tld ::= [a-zA-Z]{2,}
+```
+
+### Phone Numbers
+
+```gbnf
+root ::= phone
+
+phone ::= "(" area ")" " " exchange "-" line
+area ::= [0-9]{3}
+exchange ::= [0-9]{3}
+line ::= [0-9]{4}
+```
+
+### JSON Object
+
+Simplified JSON grammar:
+
+```gbnf
+root ::= object
+
+object ::= "{" ws members? ws "}"
+members ::= pair (ws "," ws pair)*
+pair ::= string ws ":" ws value
+
+value ::= string | number | object | array | "true" | "false" | "null"
+
+string ::= '"' chars '"'
+chars ::= ([^"\\] | "\\" ["\\bfnrt] | "\\u" [0-9a-fA-F]{4})*
+
+number ::= "-"? ([0-9] | [1-9][0-9]+) ("." [0-9]+)? ([eE] [+-]? [0-9]+)?
+
+array ::= "[" ws (value (ws "," ws value)*)? ws "]"
+
+ws ::= [ \t\n\r]*
+```
+
+### Markdown Headers
+
+```gbnf
+root ::= (header | paragraph)+
+
+header ::= "#"{1,6} " " [^\n]+ "\n"
+paragraph ::= [^\n#]+ "\n\n"
+```
+
+### Python Function Definition
+
+```gbnf
+root ::= "def " name "(" params? "):" "\n" body
+
+name ::= [a-zA-Z_][a-zA-Z0-9_]*
+params ::= param (", " param)*
+param ::= name (":" type)?
+type ::= [a-zA-Z_][a-zA-Z0-9_]*
+
+body ::= (" "{4} [^\n]+ "\n")+
+```
+
+## Usage Examples
+
+### CLI
+
+```bash
+# Use grammar file
+llama-cli -m model.gguf \
+  --grammar-file my-grammar.gbnf \
+  -p "Generate output:"
+
+# Inline grammar
+llama-cli -m model.gguf \
+  --grammar 'root ::= "yes" | "no"' \
+  -p "Answer yes or no:"
+```
+
+### Server API
+
+```bash
+curl http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "model.gguf",
+    "messages": [
+      {"role": "user", "content": "Generate a JSON user object"}
+    ],
+    "grammar": "root ::= object\nobject ::= \"{\" ... \"}\""
+  }'
+```
+
+### Python Example
+
+```python
+import json
+import requests
+
+# Load grammar
+with open("grammars/json.gbnf") as f:
+    grammar = f.read()
+
+response = requests.post(
+    "http://localhost:8080/v1/chat/completions",
+    json={
+        "model": "model.gguf",
+        "messages": [
+            {"role": "user", "content": "Generate a user profile"}
+        ],
+        "grammar": grammar,
+        "max_tokens": 256
+    }
+)
+
+result = response.json()["choices"][0]["message"]["content"]
+user_data = json.loads(result)  # Guaranteed valid JSON
+print(user_data)
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Start Simple">
+    - Begin with basic grammars and test thoroughly
+    - Add complexity incrementally
+    - Use comments to document rules
+    - Test with various prompts
+  </Accordion>
+  
+  <Accordion title="Optimize Performance">
+    - Minimize backtracking with specific rules
+    - Use character classes instead of many alternatives
+    - Avoid deeply nested optional groups
+    - Consider grammar complexity vs. model capability
+  </Accordion>
+  
+  <Accordion title="Handle Edge Cases">
+    - Test with empty inputs
+    - Verify Unicode character handling
+    - Check escape sequences
+    - Validate against malformed inputs
+  </Accordion>
+  
+  <Accordion title="JSON Generation">
+    - Use `grammars/json.gbnf` as a base
+    - Or generate from JSON Schema for complex types
+    - Validate output with JSON parser
+    - Handle optional fields correctly
+  </Accordion>
+</AccordionGroup>
+
+## Available Built-in Grammars
+
+llama.cpp includes these grammars in `grammars/`:
+
+- `json.gbnf` — Valid JSON objects
+- `json_arr.gbnf` — JSON arrays
+- `chess.gbnf` — Chess move notation
+- `arithmetic.gbnf` — Mathematical expressions
+- `c.gbnf` — C-like code
+- `japanese.gbnf` — Japanese text patterns
+- `list.gbnf` — Bulleted lists
+
+## Tools
+
+**Grammar Generator:**
+- Online: [grammar.intrinsiclabs.ai](https://grammar.intrinsiclabs.ai/)
+- Python: `examples/json_schema_to_grammar.py`
+- Pydantic: `examples/pydantic_models_to_grammar.py`
+
+**Testing:**
+- Test grammar locally before deployment
+- Use simple prompts for validation
+- Verify edge cases
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Grammar not working">
+    - Check for syntax errors in grammar
+    - Ensure file path is correct
+    - Verify grammar allows what you expect
+    - Test with simpler grammar first
+  </Accordion>
+  
+  <Accordion title="Generation stuck or slow">
+    - Grammar may be too restrictive
+    - Model struggling to match constraints
+    - Try more lenient grammar
+    - Increase temperature for flexibility
+  </Accordion>
+  
+  <Accordion title="Invalid output despite grammar">
+    - Grammar may have bugs (test separately)
+    - Check for missing rules or alternatives
+    - Verify all paths lead to valid output
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="JSON Schema" icon="brackets-curly" href="https://grammar.intrinsiclabs.ai/">
+    Generate grammars from JSON schemas
+  </Card>
+  <Card title="CLI Usage" icon="terminal" href="/api/tools/llama-cli">
+    Use grammars with llama-cli
+  </Card>
+  <Card title="Server API" icon="server" href="/api/rest/chat-completions">
+    Apply grammars in API requests
+  </Card>
+  <Card title="Function Calling" icon="function" href="/advanced/function-calling">
+    Combine with function calling
+  </Card>
+</CardGroup>

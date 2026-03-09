@@ -1,0 +1,395 @@
+---
+title: Adding New Model Architectures
+description: Step-by-step guide for adding support for new model architectures to llama.cpp
+---
+
+## Overview
+
+Adding a new model architecture to llama.cpp requires three main steps: converting the model to GGUF format, defining the model architecture in the C++ codebase, and building the GGML graph implementation for inference.
+
+<Note>
+Before starting, ensure you're familiar with the [contribution guidelines](/development/contributing) and have tested your changes with the main examples and backends (CUDA, Metal, CPU).
+</Note>
+
+## Process Overview
+
+<Steps>
+  <Step title="Convert the model to GGUF">
+    Use Python conversion scripts to transform model weights and configuration into GGUF format.
+  </Step>
+  
+  <Step title="Define the model architecture">
+    Register the model's parameters and tensor layout in the llama.cpp source files.
+  </Step>
+  
+  <Step title="Build the GGML graph">
+    Implement the inference graph logic for forward passes.
+  </Step>
+  
+  <Step title="Test the implementation">
+    Verify that examples and backends work correctly with the new architecture.
+  </Step>
+</Steps>
+
+## Step 1: Convert Model to GGUF
+
+This step is done in Python using the [gguf](https://pypi.org/project/gguf/) library.
+
+### Choose Conversion Script
+
+Depending on the model format, use either:
+- `convert_hf_to_gguf.py` - for HuggingFace models
+- `examples/convert_legacy_llama.py` - for Llama/Llama2 models in `.pth` format
+
+### Register the Model Class
+
+Define a model class with the `ModelBase.register` annotation:
+
+```python
+@ModelBase.register("MyModelForCausalLM")
+class MyModel(TextModel):
+    model_arch = gguf.MODEL_ARCH.MYMODEL
+```
+
+For vision models:
+
+```python
+@ModelBase.register("MyModelForConditionalGeneration")
+class MyModel(MmprojModel):
+    model_arch = gguf.MODEL_ARCH.MYMODEL
+```
+
+### Define Tensor Layout in constants.py
+
+Add entries to `gguf-py/gguf/constants.py`:
+
+<Accordion title="Example: Falcon Model Tensor Layout">
+```python
+MODEL_ARCH.FALCON: [
+    MODEL_TENSOR.TOKEN_EMBD,
+    MODEL_TENSOR.OUTPUT_NORM,
+    MODEL_TENSOR.OUTPUT,
+    MODEL_TENSOR.ATTN_NORM,
+    MODEL_TENSOR.ATTN_NORM_2,
+    MODEL_TENSOR.ATTN_QKV,
+    MODEL_TENSOR.ATTN_OUT,
+    MODEL_TENSOR.FFN_DOWN,
+    MODEL_TENSOR.FFN_UP,
+]
+```
+</Accordion>
+
+Add three entries:
+1. **MODEL_ARCH** enum entry
+2. **MODEL_ARCH_NAMES** - human-friendly name mapping
+3. **MODEL_TENSORS** - list of tensor names used by the architecture
+
+### Map Tensor Names
+
+Map original tensor names to GGUF standardized names in `gguf-py/gguf/tensor_mapping.py`:
+
+```python
+block_mappings_cfg: dict[MODEL_TENSOR, tuple[str, ...]] = {
+    # Attention norm
+    MODEL_TENSOR.ATTN_NORM: (
+        "gpt_neox.layers.{bid}.input_layernorm",  # gptneox
+        "transformer.h.{bid}.ln_1",                # gpt2 gpt-j refact qwen
+        "transformer.blocks.{bid}.norm_1",         # mpt
+    )
+}
+```
+
+<Note>
+The `{bid}` keyword substitutes the block/layer index for repetitive layers.
+</Note>
+
+**Example**: `transformer.blocks.{bid}.norm_1` maps to `blk.{bid}.attn_norm` in GGUF.
+
+### Verify Naming Convention
+
+<Warning>
+Tensor names must end with `.weight` or `.bias` suffixes. Several tools like `quantize` expect this convention.
+</Warning>
+
+Before adding a new tensor name, verify that an equivalent standardized name doesn't already exist in GGUF.
+
+### Override Methods as Needed
+
+Depending on the model configuration, tokenizer, and tensor layout, you may need to override:
+
+- `TextModel#set_gguf_parameters`
+- `MmprojModel#set_gguf_parameters`
+- `ModelBase#set_vocab`
+- `ModelBase#modify_tensors`
+
+## Step 2: Define Architecture in llama.cpp
+
+The model parameters and tensor layout must be defined in the C++ source files.
+
+<Steps>
+  <Step title="Add architecture enum">
+    Define a new `llm_arch` enum value in `src/llama-arch.h`:
+    
+    ```cpp
+    enum llm_arch {
+        LLM_ARCH_LLAMA,
+        LLM_ARCH_FALCON,
+        LLM_ARCH_MYMODEL,  // Add your architecture
+        // ...
+    };
+    ```
+  </Step>
+  
+  <Step title="Register in llama-arch.cpp">
+    In `src/llama-arch.cpp`:
+    
+    1. Add the architecture name to `LLM_ARCH_NAMES` map:
+    
+    ```cpp
+    static const std::map<llm_arch, const char *> LLM_ARCH_NAMES = {
+        { LLM_ARCH_LLAMA,   "llama"   },
+        { LLM_ARCH_FALCON,  "falcon"  },
+        { LLM_ARCH_MYMODEL, "mymodel" },
+        // ...
+    };
+    ```
+    
+    2. Add tensor names to `llm_get_tensor_names` (may also need to update `LLM_TENSOR_NAMES`):
+    
+    ```cpp
+    case LLM_ARCH_MYMODEL:
+        return {
+            { LLM_TENSOR_TOKEN_EMBD,  "token_embd"  },
+            { LLM_TENSOR_OUTPUT_NORM, "output_norm" },
+            { LLM_TENSOR_OUTPUT,      "output"      },
+            // ...
+        };
+    ```
+  </Step>
+  
+  <Step title="Add metadata loading">
+    Add any non-standard metadata loading in the `llama_model_loader` constructor in `src/llama-model-loader.cpp`.
+  </Step>
+  
+  <Step title="Configure RoPE (if applicable)">
+    If the model uses RoPE (Rotary Position Embeddings), add a case for the architecture in `llama_model_rope_type` function in `src/llama-model.cpp`:
+    
+    ```cpp
+    enum llama_rope_type llama_model_rope_type(const struct llama_model * model) {
+        switch (model->arch) {
+            case LLM_ARCH_MYMODEL:
+                return LLAMA_ROPE_TYPE_NORM;
+            // ...
+        }
+    }
+    ```
+  </Step>
+</Steps>
+
+<Note>
+The dimensions in `ggml` are typically in the reverse order of `pytorch` dimensions.
+</Note>
+
+## Step 3: Build the GGML Graph Implementation
+
+This is the core implementation where you define the inference logic.
+
+### Create Graph Builder Struct
+
+Create a new struct that inherits from `llm_graph_context` in `src/llama-model.cpp`:
+
+```cpp
+struct llm_build_mymodel : public llm_graph_context {
+    llm_build_mymodel(
+            llama_model & model,
+            struct ggml_context * ctx_compute,
+            const llama_batch & batch,
+            const llama_ubatch & ubatch) : llm_graph_context(model, ctx_compute, batch, ubatch) {}
+    
+    struct ggml_cgraph * build() {
+        // Implement your model's forward pass here
+        struct ggml_cgraph * gf = ggml_new_graph(ctx_compute);
+        
+        // Example: Get input tokens
+        struct ggml_tensor * inpL = ggml_get_rows(ctx_compute, 
+            model.tok_embd, batch.token);
+        
+        // Build your model architecture
+        // - Attention layers
+        // - Feed-forward networks
+        // - Normalization layers
+        // - etc.
+        
+        return gf;
+    }
+};
+```
+
+### Reference Existing Implementations
+
+Examine existing graph builders for guidance:
+- `llm_build_llama` - Standard transformer architecture
+- `llm_build_dbrx` - Mixture of experts model
+- `llm_build_bert` - Encoder-only model
+
+### Register in build_graph Method
+
+Add a case for your architecture in `llama_model::build_graph` method:
+
+```cpp
+struct ggml_cgraph * llama_model::build_graph(
+        const llama_batch & batch,
+        const llama_ubatch & ubatch) {
+    // ...
+    
+    switch (arch) {
+        case LLM_ARCH_LLAMA:
+            return llm_build_llama(*this, ctx_compute, batch, ubatch).build();
+        case LLM_ARCH_MYMODEL:
+            return llm_build_mymodel(*this, ctx_compute, batch, ubatch).build();
+        // ...
+    }
+}
+```
+
+### Backend Considerations
+
+<Warning>
+Some `ggml` backends do not support all operations. Focus on CPU support first, then add backend implementations in separate PRs.
+</Warning>
+
+Backend-specific implementations can be added later for:
+- CUDA
+- Metal
+- Vulkan
+- SYCL
+- Other accelerators
+
+### Debug the Inference Graph
+
+To debug your graph implementation, use the [llama-eval-callback](https://github.com/ggml-org/llama.cpp/tree/master/examples/eval-callback) example:
+
+```bash
+# Build with debug symbols
+cmake -DCMAKE_BUILD_TYPE=Debug -B build
+cmake --build build --target llama-eval-callback
+
+# Run with your model
+./build/bin/llama-eval-callback -m model.gguf
+```
+
+## Step 4: Test the Implementation
+
+Before opening a PR, verify that the main examples work correctly:
+
+<Accordion title="Essential Examples to Test">
+- **[cli](/api/tools/llama-cli)** - Command-line interface for text generation
+- **[completion](/inference/cli)** - Text completion example
+- **[imatrix](/models/quantizing-models)** - Importance matrix generation for quantization
+- **[quantize](/tools/quantize/)** - Model quantization tool
+- **[server](/api/tools/llama-server)** - HTTP API server
+</Accordion>
+
+### Test on Main Backends
+
+```bash
+# CPU-only test
+cmake -B build
+cmake --build build --target llama-cli
+./build/bin/llama-cli -m model.gguf -p "Test prompt"
+
+# CUDA test
+cmake -B build -DLLAMA_CUDA=ON
+cmake --build build --target llama-cli
+./build/bin/llama-cli -m model.gguf -ngl 99 -p "Test prompt"
+
+# Metal test (macOS)
+cmake -B build -DLLAMA_METAL=ON
+cmake --build build --target llama-cli
+./build/bin/llama-cli -m model.gguf -ngl 99 -p "Test prompt"
+```
+
+### Run Test Suite
+
+```bash
+# Build tests
+cmake -B build -DLLAMA_BUILD_TESTS=ON
+cmake --build build
+
+# Run all tests
+cd build
+ctest
+
+# Run specific architecture test
+ctest -R test-llama-archs -V
+```
+
+### Verify Performance
+
+Check that your implementation doesn't negatively impact performance:
+
+```bash
+# Benchmark inference speed
+llama-bench -m model.gguf -p 512 -n 128
+
+# Check perplexity
+llama-perplexity -m model.gguf -f wikitext-2-raw/wiki.test.raw
+```
+
+## Opening Your Pull Request
+
+<Steps>
+  <Step title="Focus on CPU support">
+    Initial PR should focus on CPU support only, unless you have a good reason to include other backends.
+  </Step>
+  
+  <Step title="Document your changes">
+    Provide clear documentation of:
+    - What model architecture you're adding
+    - Any special considerations or limitations
+    - Example usage with model download links
+  </Step>
+  
+  <Step title="Follow PR guidelines">
+    Review the [contributing guidelines](/development/contributing) and ensure your PR follows all requirements.
+  </Step>
+  
+  <Step title="Plan follow-up PRs">
+    Add support for other backends (CUDA, Metal, etc.) in separate follow-up PRs.
+  </Step>
+</Steps>
+
+## Resources and Examples
+
+### GGUF Specification
+
+Complete GGUF format specification:
+https://github.com/ggml-org/ggml/blob/master/docs/gguf.md
+
+### Example Pull Requests
+
+Learn from these successful model additions:
+
+- [YaRN RoPE scaling](https://github.com/ggml-org/llama.cpp/pull/2268)
+- [Baichuan serial models support](https://github.com/ggml-org/llama.cpp/pull/3009)
+- [Attention bias support](https://github.com/ggml-org/llama.cpp/pull/4283)
+- [Mixtral support](https://github.com/ggml-org/llama.cpp/pull/4406)
+- [BERT embeddings](https://github.com/ggml-org/llama.cpp/pull/5423)
+- [Grok-1 support](https://github.com/ggml-org/llama.cpp/pull/6204)
+- [Command R Plus support](https://github.com/ggml-org/llama.cpp/pull/6491)
+- [DBRX architecture](https://github.com/ggml-org/llama.cpp/pull/6515)
+
+### Additional Documentation
+
+- [How to convert HuggingFace model to GGUF format](https://github.com/ggml-org/llama.cpp/discussions/2948)
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Testing" icon="flask" href="/development/testing">
+    Learn how to thoroughly test your implementation
+  </Card>
+  <Card title="Contributing" icon="code-pull-request" href="/development/contributing">
+    Review the full contribution guidelines
+  </Card>
+</CardGroup>

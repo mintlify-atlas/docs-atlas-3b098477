@@ -1,0 +1,589 @@
+---
+title: llama.cpp Architecture
+description: Understanding the internal architecture and design of llama.cpp
+---
+
+# llama.cpp Architecture
+
+llama.cpp is designed as a minimal, efficient C/C++ implementation for large language model inference. The architecture prioritizes simplicity, portability, and performance.
+
+## Design Philosophy
+
+<CardGroup cols={2}>
+  <Card title="Minimal Dependencies" icon="cube">
+    Pure C/C++ with no external dependencies for core functionality
+  </Card>
+  
+  <Card title="Hardware Agnostic" icon="microchip">
+    Runs efficiently on CPU, GPU, and specialized accelerators
+  </Card>
+  
+  <Card title="Memory Efficient" icon="memory">
+    Optimized memory management with support for memory mapping and quantization
+  </Card>
+  
+  <Card title="Production Ready" icon="shield-check">
+    Battle-tested codebase used by millions through tools like Ollama, LM Studio, and GPT4All
+  </Card>
+</CardGroup>
+
+## High-Level Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      Application Layer                       │
+│  (llama-cli, llama-server, llama-simple, custom apps)       │
+└─────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────┐
+│                     llama.cpp Library                        │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐     │
+│  │ llama_model  │  │llama_context │  │llama_sampler │     │
+│  │              │  │              │  │              │     │
+│  │ • Model Load │  │ • Inference  │  │ • Token      │     │
+│  │ • Tensors    │  │ • KV Cache   │  │   Selection  │     │
+│  │ • Metadata   │  │ • Batch      │  │ • Sampling   │     │
+│  └──────────────┘  └──────────────┘  └──────────────┘     │
+└─────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────┐
+│                      GGML Library                            │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐     │
+│  │ Compute Graph│  │   Tensors    │  │   Backends   │     │
+│  │              │  │              │  │              │     │
+│  │ • Operations │  │ • Data Types │  │ • CPU        │     │
+│  │ • Auto-diff  │  │ • Quantized  │  │ • CUDA       │     │
+│  │ • Scheduling │  │ • Memory Mgmt│  │ • Metal      │     │
+│  └──────────────┘  └──────────────┘  └──────────────┘     │
+└─────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────┐
+│                   Hardware Abstraction                       │
+│     CPU │ CUDA │ Metal │ Vulkan │ SYCL │ OpenCL │ ...       │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## Core Components
+
+### 1. GGML Tensor Library
+
+**Purpose**: Low-level tensor operations and compute graph execution.
+
+**Key Features:**
+- Automatic differentiation
+- Computation graph building and execution
+- Multi-dimensional tensor operations
+- Backend abstraction layer
+- Memory-efficient tensor storage
+
+**Key Files:**
+- `ggml/include/ggml.h` - Core tensor library API
+- `ggml/include/ggml-backend.h` - Backend abstraction
+- `ggml/src/ggml.c` - Tensor operations implementation
+
+<Note>
+GGML (Georgi Gerganov Machine Learning) is a general-purpose tensor library. llama.cpp serves as the main playground for developing GGML features.
+</Note>
+
+**Example: Building a Computation Graph**
+
+```c
+// Allocate context
+struct ggml_init_params params = {
+    .mem_size   = 16*1024*1024,
+    .mem_buffer = NULL,
+};
+struct ggml_context * ctx = ggml_init(params);
+
+// Create tensors
+struct ggml_tensor * x = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1);
+struct ggml_tensor * a = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1);
+struct ggml_tensor * b = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1);
+
+// Build computation graph: f(x) = a*x^2 + b
+struct ggml_tensor * x2 = ggml_mul(ctx, x, x);
+struct ggml_tensor * f  = ggml_add(ctx, ggml_mul(ctx, a, x2), b);
+
+// Execute
+struct ggml_cgraph * gf = ggml_new_graph(ctx);
+ggml_build_forward_expand(gf, f);
+ggml_graph_compute_with_ctx(ctx, gf, n_threads);
+```
+
+### 2. GGUF File Format
+
+**Purpose**: Binary format for storing models with metadata and quantized weights.
+
+**Key Features:**
+- Self-describing format with embedded metadata
+- Multiple quantization formats (1.5-bit to 16-bit)
+- Extensible key-value metadata system
+- Memory-mappable for efficient loading
+- Single-file model distribution
+
+**Key Files:**
+- `ggml/include/gguf.h` - GGUF format API
+- `ggml/src/gguf.c` - GGUF implementation
+
+See [GGUF Format Documentation](/concepts/gguf-format) for details.
+
+### 3. llama Library
+
+**Purpose**: High-level LLM inference API built on top of GGML.
+
+**Key Components:**
+
+<Accordion title="llama_model - Model Management">
+Handles model loading, weight storage, and metadata.
+
+```c
+struct llama_model {
+    // Model metadata
+    llama_vocab vocab;           // Tokenizer vocabulary
+    llama_model_params params;   // Architecture parameters
+    
+    // Tensors
+    std::vector<ggml_tensor *> tensors;
+    
+    // Backend devices
+    std::vector<ggml_backend_dev_t> devices;
+    std::vector<ggml_backend_buffer_t> buffers;
+};
+```
+
+**Responsibilities:**
+- Load GGUF files from disk
+- Initialize model weights and architecture
+- Manage memory allocation across backends
+- Provide model introspection (layer count, dimensions, etc.)
+</Accordion>
+
+<Accordion title="llama_context - Inference State">
+Manages inference state including KV cache and processing batches.
+
+```c
+struct llama_context {
+    llama_model * model;           // Reference to model
+    
+    // KV cache
+    llama_kv_cache kv_self;       // Key-value attention cache
+    
+    // Batch processing
+    llama_batch batch;             // Current input batch
+    
+    // Backend
+    ggml_backend_sched_t sched;   // Compute scheduler
+    std::vector<ggml_backend_t> backends;
+};
+```
+
+**Responsibilities:**
+- Maintain conversation context (KV cache)
+- Process input tokens in batches
+- Execute inference through backend scheduler
+- Manage context window and memory
+</Accordion>
+
+<Accordion title="llama_sampler - Token Selection">
+Handles token sampling strategies for generation.
+
+```c
+struct llama_sampler {
+    // Sampling parameters
+    float temp;              // Temperature
+    float top_p;             // Nucleus sampling
+    float top_k;             // Top-K sampling
+    float min_p;             // Min-P sampling
+    
+    // State
+    llama_token_data_array candidates;
+};
+```
+
+**Responsibilities:**
+- Apply temperature scaling
+- Filter tokens (top-k, top-p, min-p)
+- Apply repetition penalties
+- Sample next token from distribution
+</Accordion>
+
+<Accordion title="llama_vocab - Tokenizer">
+Manages tokenization and vocabulary.
+
+**Supported Tokenizer Types:**
+- **SPM** (SentencePiece) - LLaMA, Mistral
+- **BPE** (Byte-Pair Encoding) - GPT-2, GPT-3
+- **WPM** (WordPiece) - BERT
+- **UGM** (Unigram) - T5
+- **RWKV** - Greedy tokenization
+
+**Responsibilities:**
+- Encode text to token IDs
+- Decode token IDs to text
+- Handle special tokens (BOS, EOS, etc.)
+</Accordion>
+
+**Key Files:**
+- `include/llama.h` - Public C API
+- `src/llama.cpp` - Main implementation
+- `src/llama-vocab.cpp` - Tokenization
+- `src/llama-context.cpp` - Context management
+- `src/llama-model.cpp` - Model loading
+
+## Inference Pipeline
+
+The complete flow from input text to generated output:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ 1. Input Text                                                │
+│    "Hello, how are you?"                                     │
+└────────────────────────┬────────────────────────────────────┘
+                         ↓
+┌─────────────────────────────────────────────────────────────┐
+│ 2. Tokenization (llama_vocab)                                │
+│    "Hello" → 15043, "," → 11, " how" → 1268, ...            │
+└────────────────────────┬────────────────────────────────────┘
+                         ↓
+┌─────────────────────────────────────────────────────────────┐
+│ 3. Encode Batch (llama_encode)                               │
+│    • Load tokens into batch                                  │
+│    • Process through transformer layers                      │
+│    • Update KV cache with prompt                             │
+└────────────────────────┬────────────────────────────────────┘
+                         ↓
+┌─────────────────────────────────────────────────────────────┐
+│ 4. Generate Loop                                             │
+│    ┌────────────────────────────────────────────┐           │
+│    │ 4a. Decode (llama_decode)                  │           │
+│    │     • Process last token                   │           │
+│    │     • Attention with KV cache              │           │
+│    │     • Get output logits                    │           │
+│    └──────────────┬─────────────────────────────┘           │
+│                   ↓                                          │
+│    ┌────────────────────────────────────────────┐           │
+│    │ 4b. Sample Token (llama_sampler)           │           │
+│    │     • Apply temperature                    │           │
+│    │     • Filter (top-k, top-p)                │           │
+│    │     • Sample from distribution             │           │
+│    │     • Return token ID                      │           │
+│    └──────────────┬─────────────────────────────┘           │
+│                   ↓                                          │
+│    ┌────────────────────────────────────────────┐           │
+│    │ 4c. Check Stop Condition                   │           │
+│    │     • EOS token?                           │           │
+│    │     • Max length?                          │           │
+│    │     • User stop sequence?                  │           │
+│    └──────────────┬─────────────────────────────┘           │
+│                   ↓                                          │
+│    └───────────── Loop until stop ─────────────┘            │
+└────────────────────────┬────────────────────────────────────┘
+                         ↓
+┌─────────────────────────────────────────────────────────────┐
+│ 5. Detokenization (llama_vocab)                              │
+│    15043, 11, 1268, ... → "Hello, how are you?"              │
+└────────────────────────┬────────────────────────────────────┘
+                         ↓
+┌─────────────────────────────────────────────────────────────┐
+│ 6. Output Text                                               │
+│    "I'm doing well, thank you for asking!"                   │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## Model Loading Process
+
+<Accordion title="Step 1: File Validation">
+```c
+// Open and validate GGUF file
+struct gguf_init_params params = {
+    .no_alloc = true,
+    .ctx = NULL
+};
+struct gguf_context * ctx = gguf_init_from_file("model.gguf", params);
+
+// Verify magic number, version
+verify_gguf_magic(ctx);
+```
+</Accordion>
+
+<Accordion title="Step 2: Parse Metadata">
+```c
+// Read model hyperparameters
+const char * arch = gguf_get_val_str(ctx, "general.architecture");
+int n_layers = gguf_get_val_i32(ctx, "{arch}.block_count");
+int n_heads = gguf_get_val_i32(ctx, "{arch}.attention.head_count");
+int n_embd = gguf_get_val_i32(ctx, "{arch}.embedding_length");
+
+// Load tokenizer vocabulary
+load_vocab_from_gguf(ctx, &model->vocab);
+```
+</Accordion>
+
+<Accordion title="Step 3: Allocate Memory">
+```c
+// Calculate memory requirements
+size_t mem_required = calculate_model_size(ctx);
+
+// Allocate buffers across backends
+for (auto & backend : backends) {
+    ggml_backend_buffer_t buffer = ggml_backend_alloc_buffer(
+        backend, mem_required
+    );
+    model->buffers.push_back(buffer);
+}
+```
+</Accordion>
+
+<Accordion title="Step 4: Load Tensors">
+```c
+// Memory map or read tensor data
+if (use_mmap) {
+    // Memory map file for zero-copy loading
+    model->mmap = llama_mmap_file("model.gguf", prefetch);
+} else {
+    // Read tensors into allocated buffers
+    for (tensor in model->tensors) {
+        read_tensor_data(tensor);
+    }
+}
+```
+</Accordion>
+
+<Accordion title="Step 5: Backend Initialization">
+```c
+// Initialize compute backends
+if (n_gpu_layers > 0) {
+    // Offload layers to GPU
+    for (int i = 0; i < n_gpu_layers; i++) {
+        offload_layer_to_gpu(model, i);
+    }
+}
+
+// Create backend scheduler
+model->sched = ggml_backend_sched_new(
+    backends.data(),
+    backends.size(),
+    GGML_DEFAULT_GRAPH_SIZE
+);
+```
+</Accordion>
+
+## KV Cache Management
+
+The Key-Value cache is critical for efficient autoregressive generation:
+
+```c
+struct llama_kv_cache {
+    // Cache configuration
+    uint32_t size;           // Maximum number of tokens
+    uint32_t used;           // Currently used tokens
+    
+    // Storage for key/value tensors
+    struct ggml_tensor * k;  // [n_layers, n_ctx, n_embd]
+    struct ggml_tensor * v;  // [n_layers, n_ctx, n_embd]
+    
+    // Sequence tracking
+    std::vector<llama_seq_id> cells;
+};
+```
+
+**Cache Operations:**
+
+```c
+// Clear cache
+llama_kv_cache_clear(ctx);
+
+// Remove specific sequence
+llama_kv_cache_seq_rm(ctx, seq_id, p0, p1);
+
+// Copy sequence
+llama_kv_cache_seq_cp(ctx, seq_src, seq_dst, p0, p1);
+
+// Shift positions (for sliding window)
+llama_kv_cache_seq_shift(ctx, seq_id, p0, p1, delta);
+```
+
+<Info>
+The KV cache stores attention keys and values for previously processed tokens, avoiding recomputation during generation.
+</Info>
+
+## Memory Management
+
+llama.cpp employs several strategies for efficient memory usage:
+
+### Memory Mapping (mmap)
+
+```c
+// Enable memory mapping (default)
+llama_model_params params = llama_model_default_params();
+params.use_mmap = true;
+```
+
+**Benefits:**
+- Zero-copy model loading
+- OS handles paging
+- Shared memory across processes
+- Faster startup
+
+### Memory Locking (mlock)
+
+```c
+// Lock model in RAM (prevents swapping)
+params.use_mlock = true;
+```
+
+**Benefits:**
+- Prevents model from being swapped to disk
+- Consistent inference latency
+- Requires sufficient RAM
+
+### Quantization
+
+See [Quantization Documentation](/concepts/quantization) for details on reducing memory footprint.
+
+## Backend Abstraction
+
+The backend scheduler dynamically routes operations to appropriate compute devices:
+
+```c
+struct ggml_backend_sched {
+    // Available backends
+    std::vector<ggml_backend_t> backends;
+    
+    // Operation scheduling
+    schedule_operation(ggml_tensor * tensor) {
+        // Decide which backend executes this operation
+        if (tensor_on_gpu(tensor)) {
+            return gpu_backend;
+        } else {
+            return cpu_backend;
+        }
+    }
+};
+```
+
+**Split Execution:**
+- CPU handles some operations (layer norms, embeddings)
+- GPU handles matrix multiplications
+- Automatic data transfer between devices
+
+See [Backends Documentation](/concepts/backends) for supported hardware.
+
+## Thread Pool
+
+llama.cpp uses a thread pool for CPU parallelism:
+
+```c
+// Set thread count
+llama_context_params params = llama_context_default_params();
+params.n_threads = 8;          // Threads for generation
+params.n_threads_batch = 8;    // Threads for prompt processing
+```
+
+<Note>
+Optimal thread count is typically the number of **physical** CPU cores, not logical cores.
+</Note>
+
+## Optimization Techniques
+
+### Batch Processing
+
+Process multiple tokens/prompts simultaneously:
+
+```c
+llama_batch batch = llama_batch_init(512, 0, 1);
+
+// Add multiple tokens to batch
+for (int i = 0; i < n_tokens; i++) {
+    llama_batch_add(batch, tokens[i], i, {0}, i == n_tokens - 1);
+}
+
+// Process entire batch
+llama_decode(ctx, batch);
+```
+
+### Flash Attention
+
+Memory-efficient attention computation:
+
+```c
+params.flash_attn = true;  // Enable flash attention
+```
+
+### Speculative Decoding
+
+Use a small draft model to speed up generation:
+
+```bash
+llama-server -m model.gguf -md draft-model.gguf
+```
+
+## Simple Example
+
+Minimal inference example:
+
+```c
+#include "llama.h"
+
+int main() {
+    // Initialize backend
+    llama_backend_init();
+    
+    // Load model
+    llama_model_params model_params = llama_model_default_params();
+    llama_model * model = llama_model_load_from_file(
+        "model.gguf", 
+        model_params
+    );
+    
+    // Create context
+    llama_context_params ctx_params = llama_context_default_params();
+    ctx_params.n_ctx = 2048;
+    llama_context * ctx = llama_init_from_model(model, ctx_params);
+    
+    // Tokenize prompt
+    const char * prompt = "Hello, world!";
+    std::vector<llama_token> tokens = llama_tokenize(
+        model, prompt, true
+    );
+    
+    // Encode prompt
+    llama_batch batch = llama_batch_get_one(tokens.data(), tokens.size());
+    llama_encode(ctx, batch);
+    
+    // Generate tokens
+    llama_sampler * sampler = llama_sampler_init_greedy();
+    
+    for (int i = 0; i < 100; i++) {
+        // Get next token
+        llama_token token = llama_sampler_sample(sampler, ctx, -1);
+        
+        if (token == llama_token_eos(model)) break;
+        
+        // Decode token
+        char buf[256];
+        llama_token_to_piece(model, token, buf, sizeof(buf), 0, true);
+        printf("%s", buf);
+        
+        // Feed token back
+        batch = llama_batch_get_one(&token, 1);
+        llama_decode(ctx, batch);
+    }
+    
+    // Cleanup
+    llama_sampler_free(sampler);
+    llama_free(ctx);
+    llama_model_free(model);
+    llama_backend_free();
+    
+    return 0;
+}
+```
+
+## Further Reading
+
+- [GGML Library Documentation](https://github.com/ggml-org/ggml)
+- [llama.h API Reference](/api/libllama)
+- [GGUF Format Specification](/concepts/gguf-format)
+- [Performance Optimization Tips](/advanced/performance-tuning)
+- [Adding New Model Support](/development/adding-models)

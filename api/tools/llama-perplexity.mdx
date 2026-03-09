@@ -1,0 +1,359 @@
+---
+title: 'llama-perplexity'
+description: 'Measure perplexity and evaluate language model quality'
+---
+
+## Overview
+
+`llama-perplexity` is a tool for measuring the perplexity and other quality metrics of language models over text corpora. It's primarily used to evaluate quantization quality loss and compare model performance.
+
+## What is Perplexity?
+
+Perplexity measures how well a model predicts the next token:
+
+- **Lower values = better prediction**
+- Indicates model "surprise" at seeing the actual next token
+- Used to compare quantized models against FP16 baseline
+- **Not directly comparable** between different models or tokenizers
+
+<Note>
+  Perplexity is a technical metric for judging quantization quality, not end-user model quality. Finetunes may have higher perplexity but better human-rated outputs.
+</Note>
+
+## Quick Start
+
+<CodeGroup>
+```bash Basic perplexity
+llama-perplexity -m model.gguf -f wikitext-2-raw/wiki.test.raw
+
+# Output:
+# [1]15.2701,[2]5.4007,[3]5.3073,[4]6.2965,[5]5.8940,...
+# Final estimate: PPL = 5.4007 +/- 0.67339
+```
+
+```bash Get test dataset
+# Download Wikitext-2 test set (standard benchmark)
+scripts/get-wikitext-2.sh
+
+llama-perplexity -m model.gguf -f wikitext-2-raw/wiki.test.raw
+```
+</CodeGroup>
+
+## Basic Usage
+
+### Measure Perplexity
+
+```bash
+llama-perplexity -m model.gguf -f test-corpus.txt
+```
+
+Outputs:
+- Progressive perplexity per chunk
+- Final mean perplexity ± uncertainty
+- Uncertainty calculated via Gaussian distribution assumption
+
+### Command-Line Options
+
+<ParamField path="-m, --model" type="string">
+  Path to the GGUF model file.
+</ParamField>
+
+<ParamField path="-f, --file" type="string">
+  Text file containing the test corpus.
+</ParamField>
+
+<ParamField path="-c, --ctx-size" type="integer">
+  Context size for evaluation.
+</ParamField>
+
+<ParamField path="-b, --batch-size" type="integer">
+  Batch size for processing.
+</ParamField>
+
+<ParamField path="-ngl, --n-gpu-layers" type="integer">
+  Number of layers to offload to GPU.
+</ParamField>
+
+## Advanced Analysis: KL Divergence
+
+### Why KL Divergence?
+
+Kullback-Leibler (KL) divergence measures how similar two probability distributions are:
+
+- **KL = 0**: Distributions are identical
+- **Higher values**: More difference between models
+- Used to compare quantized model to FP16 reference
+
+### Two-Step Process
+
+<Steps>
+  <Step title="Record FP16 baseline">
+    First, record logits from the FP16 model:
+    
+    ```bash
+    llama-perplexity -m model-f16.gguf \
+      -f wikitext-2-raw/wiki.test.raw \
+      --kl-divergence-base model-f16.kld
+    ```
+    
+    <Note>
+      The `.kld` file will be very large:
+      - LLaMA 2: ~11 GiB
+      - LLaMA 3: ~37 GiB  
+      (for Wikitext-2 test set)
+    </Note>
+  </Step>
+  
+  <Step title="Compare quantized model">
+    Then compare the quantized model against the baseline:
+    
+    ```bash
+    llama-perplexity -m model-q4_k_m.gguf \
+      -f wikitext-2-raw/wiki.test.raw \
+      --kl-divergence-base model-f16.kld \
+      --kl-divergence
+    ```
+  </Step>
+</Steps>
+
+### KL Divergence Output
+
+With `--kl-divergence`, you get comprehensive statistics:
+
+```
+Mean PPL(Q)                    :      6.407115 ± 0.039119
+Mean PPL(base)                 :      6.231634 ± 0.037833
+Cor(ln(PPL(Q)), ln(PPL(base))) :                  99.340%
+Mean ln(PPL(Q)/PPL(base))      :      0.027704 ± 0.000713
+Mean PPL(Q)/PPL(base)          :      1.028160 ± 0.000723
+Mean PPL(Q)-PPL(base)          :      0.175482 ± 0.004620
+Mean KLD                       :  0.03127339 ± 0.00023848
+Mean Δp                        :    -0.596 ± 0.014 %
+RMS Δp                         :     5.519 ± 0.050 %
+Same top p                     :    91.901 ± 0.072 %
+```
+
+## Understanding Metrics
+
+### Perplexity Ratio
+
+```
+Mean PPL(Q)/PPL(base) = 1.028160 ± 0.000723
+```
+
+- Ratio of quantized to FP16 perplexity
+- **Closer to 1.0 = less quality loss**
+- Values > 1.0 indicate degradation
+
+### Mean Δp (Change in Token Probability)
+
+```
+Mean Δp = -0.596 ± 0.014 %
+```
+
+- Average change in correct token probability
+- **Positive**: Model improved (rare)
+- **Negative**: Model degraded  
+- **Close to 0%**: Minimal impact
+
+### RMS Δp (Root Mean Square Change)
+
+```
+RMS Δp = 5.519 ± 0.050 %
+```
+
+Think of this as "noise level" from quantization:
+- **Lower is better**
+- Indicates overall distribution shift
+- Related to Gaussian noise assumption
+
+### Same Top p
+
+```
+Same top p = 91.901 ± 0.072 %
+```
+
+- Percentage of time both models agree on the most likely token
+- **Higher is better**
+- Practical indicator of consistency
+
+### Percentile Analysis
+
+The tool also reports change in token probability at various percentiles:
+
+```
+99.9% Δp    :             27.084%
+99.0% Δp    :             12.084%
+Median Δp   :             -0.024%
+1.0% Δp     :            -19.567%
+0.1% Δp     :            -56.054%
+Minimum Δp  :            -98.699%
+```
+
+- **Symmetric distribution**: Quantization adds random noise
+- **Asymmetric (more negative)**: Actual quality degradation
+- Helps distinguish noise from systematic errors
+
+## Benchmarking Quantizations
+
+### Standard Test Setup
+
+Llama.cpp contributors use this standard:
+
+1. **Dataset**: Wikitext-2 test set
+2. **Baseline**: FP16 model
+3. **Method**: KL divergence comparison
+
+### Example: Compare Q4 Quantizations
+
+```bash
+# Record baseline once
+llama-perplexity -m model-f16.gguf \
+  -f wikitext-2-raw/wiki.test.raw \
+  --kl-divergence-base baseline.kld
+
+# Test Q4_0
+llama-perplexity -m model-q4_0.gguf \
+  -f wikitext-2-raw/wiki.test.raw \
+  --kl-divergence-base baseline.kld \
+  --kl-divergence
+
+# Test Q4_K_M
+llama-perplexity -m model-q4_k_m.gguf \
+  -f wikitext-2-raw/wiki.test.raw \
+  --kl-divergence-base baseline.kld \
+  --kl-divergence
+
+# Test Q4_K_S
+llama-perplexity -m model-q4_k_s.gguf \
+  -f wikitext-2-raw/wiki.test.raw \
+  --kl-divergence-base baseline.kld \
+  --kl-divergence
+```
+
+### Interpreting Results
+
+Lower KLD and higher "Same top p" indicate better quantization:
+
+| Quantization | KLD      | Mean Δp  | Same top p |
+|--------------|----------|----------|------------|
+| Q8_0         | 0.00136  | -0.019%  | 97.67%     |
+| Q6_K         | 0.00545  | -0.007%  | 96.03%     |
+| Q5_K_M       | 0.01076  | -0.114%  | 94.35%     |
+| Q4_K_M       | 0.03127  | -0.596%  | 91.90%     |
+| Q4_0         | 0.07194  | -1.588%  | 87.42%     |
+
+<Note>
+  These are example numbers. Actual results vary by model architecture and content.
+</Note>
+
+## Importance Matrices
+
+Some quantizations support importance matrices for better quality:
+
+```bash
+# Create importance matrix from training data
+llama-imatrix -m model-f16.gguf \
+  -f training-data.txt \
+  -o importance.dat
+
+# Use during quantization
+llama-quantize --imatrix importance.dat \
+  model-f16.gguf model-q4_k_m.gguf Q4_K_M
+
+# Test the result
+llama-perplexity -m model-q4_k_m.gguf \
+  -f wikitext-2-raw/wiki.test.raw \
+  --kl-divergence-base baseline.kld \
+  --kl-divergence
+```
+
+Importance matrices can significantly improve quality for some quantization types, especially at lower bit counts.
+
+## Example: LLaMA 3 8B Results
+
+From the official llama.cpp benchmarks:
+
+| Quantization | Model Size | PPL          | KLD     | Mean Δp   | RMS Δp   | Same top p |
+|--------------|------------|--------------|---------|-----------|----------|------------|
+| f16          | 14.97 GiB  | 6.2332 ± .04 | 0.00055 | 0.001%    | 0.787%   | 99.87%     |
+| q8_0         | 7.96 GiB   | 6.2343 ± .04 | 0.00136 | -0.019%   | 1.198%   | 97.67%     |
+| q6_K         | 6.14 GiB   | 6.2534 ± .04 | 0.00545 | -0.007%   | 2.295%   | 96.03%     |
+| q5_K_M       | 5.33 GiB   | 6.2886 ± .04 | 0.01076 | -0.114%   | 3.160%   | 94.35%     |
+| q4_K_M       | 4.58 GiB   | 6.4071 ± .04 | 0.03127 | -0.596%   | 5.519%   | 91.90%     |
+| q4_0         | 4.34 GiB   | 6.7001 ± .04 | 0.07194 | -1.588%   | 8.434%   | 87.42%     |
+| q3_K_M       | 3.74 GiB   | 6.8885 ± .04 | 0.10191 | -1.990%   | 10.203%  | 83.52%     |
+| q2_K         | 2.96 GiB   | 9.7516 ± .06 | 0.44513 | -9.123%   | 21.421%  | 71.14%     |
+
+## Practical Guidelines
+
+<Steps>
+  <Step title="Choose baseline">
+    Use FP16 or BF16 as your reference model.
+  </Step>
+  
+  <Step title="Record logits">
+    Create the baseline `.kld` file once:
+    
+    ```bash
+    llama-perplexity -m model-f16.gguf \
+      -f wikitext-2-raw/wiki.test.raw \
+      --kl-divergence-base baseline.kld
+    ```
+  </Step>
+  
+  <Step title="Test quantizations">
+    Compare each quantized version:
+    
+    ```bash
+    for quant in q8_0 q6_k q5_k_m q4_k_m q4_0; do
+      echo "Testing $quant..."
+      llama-perplexity -m model-$quant.gguf \
+        -f wikitext-2-raw/wiki.test.raw \
+        --kl-divergence-base baseline.kld \
+        --kl-divergence | tee results-$quant.txt
+    done
+    ```
+  </Step>
+  
+  <Step title="Compare results">
+    Look at:
+    - **KL divergence**: Overall distribution similarity
+    - **Same top p**: Practical consistency  
+    - **Mean Δp**: Average quality change
+    - **Percentiles**: Noise vs degradation
+  </Step>
+</Steps>
+
+## Limitations & Notes
+
+<Note>
+  **Important Limitations**
+  
+  - Perplexity is **not** comparable between different models
+  - Different tokenizers produce different perplexity values
+  - Finetunes often have higher perplexity but better quality
+  - Results are implementation-specific (llama.cpp vs other frameworks)
+  - Use the same test set for all comparisons
+</Note>
+
+## Performance Considerations
+
+Perplexity calculation can be slow:
+
+```bash
+# Use GPU offloading
+llama-perplexity -m model.gguf -f test.txt -ngl 99
+
+# Adjust batch size
+llama-perplexity -m model.gguf -f test.txt -b 512
+
+# Smaller context for faster testing
+llama-perplexity -m model.gguf -f test.txt -c 2048
+```
+
+## See Also
+
+- [llama-bench](/api/tools/llama-bench) - Speed and throughput benchmarking
+- [Quantization Guide](https://github.com/ggml-org/llama.cpp/blob/master/tools/quantize/README.md)
+- [Perplexity Documentation](https://huggingface.co/docs/transformers/perplexity)

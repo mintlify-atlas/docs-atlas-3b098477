@@ -1,0 +1,363 @@
+---
+title: "Docker Deployment"
+description: "Run llama.cpp in Docker containers for easy deployment and isolation"
+---
+
+# Docker Deployment
+
+Docker provides an easy way to run llama.cpp without building from source, with support for CPU and various GPU backends.
+
+## Prerequisites
+
+- Docker must be installed and running on your system
+- Create a folder to store models and intermediate files (e.g., `/llama/models`)
+
+## Available Images
+
+llama.cpp provides pre-built Docker images in three variants:
+
+<CardGroup cols={3}>
+  <Card title="Full" icon="box">
+    Complete toolset including CLI, conversion tools, and quantization
+  </Card>
+  <Card title="Light" icon="feather">
+    Only `llama-cli` and `llama-completion` executables
+  </Card>
+  <Card title="Server" icon="server">
+    Only `llama-server` for API deployment
+  </Card>
+</CardGroup>
+
+### CPU Images
+
+```bash
+ghcr.io/ggml-org/llama.cpp:full
+ghcr.io/ggml-org/llama.cpp:light
+ghcr.io/ggml-org/llama.cpp:server
+```
+
+Platforms: `linux/amd64`, `linux/arm64`, `linux/s390x`
+
+### GPU Images
+
+<Tabs>
+  <Tab title="CUDA (NVIDIA)">
+    ```bash
+    ghcr.io/ggml-org/llama.cpp:full-cuda
+    ghcr.io/ggml-org/llama.cpp:light-cuda
+    ghcr.io/ggml-org/llama.cpp:server-cuda
+    ```
+    
+    Platform: `linux/amd64`
+  </Tab>
+  <Tab title="ROCm (AMD)">
+    ```bash
+    ghcr.io/ggml-org/llama.cpp:full-rocm
+    ghcr.io/ggml-org/llama.cpp:light-rocm
+    ghcr.io/ggml-org/llama.cpp:server-rocm
+    ```
+    
+    Platforms: `linux/amd64`, `linux/arm64`
+  </Tab>
+  <Tab title="SYCL (Intel)">
+    ```bash
+    ghcr.io/ggml-org/llama.cpp:full-intel
+    ghcr.io/ggml-org/llama.cpp:light-intel
+    ghcr.io/ggml-org/llama.cpp:server-intel
+    ```
+    
+    Platform: `linux/amd64`
+  </Tab>
+  <Tab title="Vulkan">
+    ```bash
+    ghcr.io/ggml-org/llama.cpp:full-vulkan
+    ghcr.io/ggml-org/llama.cpp:light-vulkan
+    ghcr.io/ggml-org/llama.cpp:server-vulkan
+    ```
+    
+    Platform: `linux/amd64`
+  </Tab>
+  <Tab title="MUSA (Moore Threads)">
+    ```bash
+    ghcr.io/ggml-org/llama.cpp:full-musa
+    ghcr.io/ggml-org/llama.cpp:light-musa
+    ghcr.io/ggml-org/llama.cpp:server-musa
+    ```
+    
+    Platform: `linux/amd64`
+  </Tab>
+</Tabs>
+
+<Note>
+GPU-enabled images are not currently tested by CI beyond being built. If you need different settings (e.g., different CUDA version), you'll need to build locally.
+</Note>
+
+## Quick Start
+
+### Run CLI Interactive
+
+```bash
+docker run -v /path/to/models:/models ghcr.io/ggml-org/llama.cpp:light \
+  -m /models/model.gguf -p "Hello, world!"
+```
+
+### Run Server
+
+```bash
+docker run -v /path/to/models:/models -p 8080:8080 \
+  ghcr.io/ggml-org/llama.cpp:server \
+  -m /models/model.gguf --port 8080 --host 0.0.0.0
+```
+
+Access the API at `http://localhost:8080`
+
+### All-in-One Conversion
+
+The `full` image includes model conversion tools:
+
+```bash
+docker run -v /path/to/models:/models \
+  ghcr.io/ggml-org/llama.cpp:full \
+  --all-in-one "/models/" 7B
+```
+
+## GPU Acceleration
+
+### NVIDIA GPU (CUDA)
+
+Requires [nvidia-container-toolkit](https://github.com/NVIDIA/nvidia-container-toolkit) installed.
+
+```bash
+docker run --gpus all -v /path/to/models:/models \
+  ghcr.io/ggml-org/llama.cpp:server-cuda \
+  -m /models/model.gguf \
+  --n-gpu-layers 32 \
+  --port 8080 --host 0.0.0.0
+```
+
+### AMD GPU (ROCm)
+
+```bash
+docker run --device=/dev/kfd --device=/dev/dri \
+  -v /path/to/models:/models \
+  ghcr.io/ggml-org/llama.cpp:server-rocm \
+  -m /models/model.gguf \
+  --n-gpu-layers 32
+```
+
+## Docker Compose
+
+Create a `docker-compose.yml` file:
+
+```yaml docker-compose.yml
+version: '3.8'
+
+services:
+  llama-server:
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda
+    volumes:
+      - ./models:/models
+    ports:
+      - "8080:8080"
+    command: >
+      -m /models/model.gguf
+      --port 8080
+      --host 0.0.0.0
+      --n-gpu-layers 32
+      -c 4096
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+```
+
+Run with:
+
+```bash
+docker compose up -d
+```
+
+## Building Locally
+
+### Build CPU Image
+
+```bash
+docker build -t local/llama.cpp:full \
+  --target full \
+  -f .devops/full.Dockerfile .
+```
+
+### Build CUDA Image
+
+```bash
+docker build -t local/llama.cpp:full-cuda \
+  --target full \
+  --build-arg CUDA_VERSION=12.4.0 \
+  --build-arg CUDA_DOCKER_ARCH=all \
+  -f .devops/cuda.Dockerfile .
+```
+
+<AccordionGroup>
+  <Accordion title="Build Arguments">
+    **CUDA_VERSION**: CUDA version to use (default: `12.4.0`)
+    
+    **CUDA_DOCKER_ARCH**: Target GPU architectures (default: `all`)
+    
+    Specify specific architectures for smaller images:
+    ```bash
+    --build-arg CUDA_DOCKER_ARCH="70;75;80;86"
+    ```
+  </Accordion>
+  
+  <Accordion title="ROCm Build">
+    ```bash
+    docker build -t local/llama.cpp:server-rocm \
+      --target server \
+      -f .devops/rocm.Dockerfile .
+    ```
+  </Accordion>
+  
+  <Accordion title="Vulkan Build">
+    ```bash
+    docker build -t local/llama.cpp:server-vulkan \
+      --target server \
+      -f .devops/vulkan.Dockerfile .
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Production Deployment
+
+### Health Check
+
+Add health checks to your Docker configuration:
+
+```yaml
+healthcheck:
+  test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 40s
+```
+
+### Resource Limits
+
+```yaml
+deploy:
+  resources:
+    limits:
+      cpus: '4'
+      memory: 16G
+    reservations:
+      cpus: '2'
+      memory: 8G
+```
+
+### Environment Variables
+
+```yaml
+environment:
+  - LLAMA_ARG_THREADS=8
+  - LLAMA_ARG_CTX_SIZE=4096
+  - LLAMA_ARG_N_GPU_LAYERS=32
+```
+
+## Kubernetes Deployment
+
+<Accordion title="Example Kubernetes Deployment">
+```yaml k8s-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llama-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: llama-server
+  template:
+    metadata:
+      labels:
+        app: llama-server
+    spec:
+      containers:
+      - name: llama-server
+        image: ghcr.io/ggml-org/llama.cpp:server-cuda
+        args:
+          - "-m"
+          - "/models/model.gguf"
+          - "--port"
+          - "8080"
+          - "--host"
+          - "0.0.0.0"
+          - "--n-gpu-layers"
+          - "32"
+        ports:
+        - containerPort: 8080
+        volumeMounts:
+        - name: models
+          mountPath: /models
+        resources:
+          limits:
+            nvidia.com/gpu: 1
+      volumes:
+      - name: models
+        persistentVolumeClaim:
+          claimName: llama-models
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: llama-server
+spec:
+  selector:
+    app: llama-server
+  ports:
+  - port: 8080
+    targetPort: 8080
+  type: LoadBalancer
+```
+</Accordion>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="GPU not detected in container">
+    - Ensure nvidia-container-toolkit is installed and configured
+    - Check `nvidia-smi` works inside container:
+      ```bash
+      docker run --gpus all nvidia/cuda:12.4.0-base-ubuntu22.04 nvidia-smi
+      ```
+    - Verify `--gpus all` flag is set
+  </Accordion>
+  
+  <Accordion title="Out of memory errors">
+    - Reduce context size: `-c 2048`
+    - Reduce GPU layers: `--n-gpu-layers 16`
+    - Use smaller quantization: Q4_K_M instead of Q8_0
+    - Increase Docker memory limits
+  </Accordion>
+  
+  <Accordion title="Permission denied errors">
+    - Check volume mount paths exist and are readable
+    - Run with user permissions:
+      ```bash
+      docker run --user $(id -u):$(id -g) ...
+      ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Server Configuration" icon="gear" href="/api/tools/llama-server">
+    Learn about server options and configuration
+  </Card>
+  <Card title="REST API" icon="plug" href="/api/rest/overview">
+    Use the OpenAI-compatible API
+  </Card>
+</CardGroup>

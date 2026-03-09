@@ -1,0 +1,339 @@
+---
+title: 'libllama C API'
+description: 'Overview of the llama.cpp C API for LLM inference'
+---
+
+## Overview
+
+The libllama C API provides a complete interface for loading and running large language models in C/C++ applications. The API is designed around four core concepts:
+
+- **Model**: Loaded from GGUF files, contains model weights and architecture
+- **Context**: Runtime state for inference, manages KV cache and computation
+- **Batch**: Input data structure for encoding/decoding tokens
+- **Sampler**: Token selection strategies for text generation
+
+## Initialization
+
+Before using the library, initialize the backend:
+
+```c
+void llama_backend_init(void);
+void llama_backend_free(void);
+```
+
+<Note>
+Call `llama_backend_init()` once at program startup. For cleanup, call `llama_backend_free()` at program exit.
+</Note>
+
+### NUMA Support (Optional)
+
+```c
+void llama_numa_init(enum ggml_numa_strategy numa);
+```
+
+Optionally configure NUMA (Non-Uniform Memory Access) optimizations for multi-socket systems.
+
+## Basic Usage Pattern
+
+The typical workflow for using libllama follows this pattern:
+
+<CodeGroup>
+```c Basic Inference Flow
+// 1. Initialize backend
+llama_backend_init();
+
+// 2. Load model
+llama_model_params model_params = llama_model_default_params();
+model_params.n_gpu_layers = 32;
+llama_model * model = llama_model_load_from_file("model.gguf", model_params);
+
+// 3. Create context
+llama_context_params ctx_params = llama_context_default_params();
+ctx_params.n_ctx = 2048;
+llama_context * ctx = llama_init_from_model(model, ctx_params);
+
+// 4. Initialize sampler
+llama_sampler * sampler = llama_sampler_chain_init(
+    llama_sampler_chain_default_params()
+);
+llama_sampler_chain_add(sampler, llama_sampler_init_greedy());
+
+// 5. Tokenize input
+const llama_vocab * vocab = llama_model_get_vocab(model);
+std::vector<llama_token> tokens(256);
+int n_tokens = llama_tokenize(
+    vocab, 
+    "Hello, world!", 13,
+    tokens.data(), tokens.size(),
+    true,  // add_special
+    false  // parse_special
+);
+
+// 6. Create batch and decode
+llama_batch batch = llama_batch_get_one(tokens.data(), n_tokens);
+llama_decode(ctx, batch);
+
+// 7. Sample next token
+llama_token new_token = llama_sampler_sample(sampler, ctx, -1);
+
+// 8. Cleanup
+llama_sampler_free(sampler);
+llama_free(ctx);
+llama_model_free(model);
+llama_backend_free();
+```
+</CodeGroup>
+
+## Simple Example
+
+Here's a complete minimal example based on `examples/simple/simple.cpp`:
+
+<CodeGroup>
+```cpp simple.cpp
+#include "llama.h"
+#include <cstdio>
+#include <string>
+#include <vector>
+
+int main(int argc, char ** argv) {
+    // Initialize backend
+    ggml_backend_load_all();
+    
+    // Load model
+    llama_model_params model_params = llama_model_default_params();
+    model_params.n_gpu_layers = 99;
+    
+    llama_model * model = llama_model_load_from_file("model.gguf", model_params);
+    if (model == NULL) {
+        fprintf(stderr, "error: unable to load model\n");
+        return 1;
+    }
+    
+    // Get vocabulary for tokenization
+    const llama_vocab * vocab = llama_model_get_vocab(model);
+    
+    // Tokenize prompt
+    std::string prompt = "Hello my name is";
+    const int n_prompt = -llama_tokenize(vocab, prompt.c_str(), prompt.size(), 
+                                          NULL, 0, true, true);
+    
+    std::vector<llama_token> prompt_tokens(n_prompt);
+    llama_tokenize(vocab, prompt.c_str(), prompt.size(), 
+                   prompt_tokens.data(), prompt_tokens.size(), true, true);
+    
+    // Create context
+    llama_context_params ctx_params = llama_context_default_params();
+    ctx_params.n_ctx = n_prompt + 32;  // prompt + n_predict
+    ctx_params.n_batch = n_prompt;
+    ctx_params.no_perf = false;
+    
+    llama_context * ctx = llama_init_from_model(model, ctx_params);
+    if (ctx == NULL) {
+        fprintf(stderr, "error: failed to create context\n");
+        return 1;
+    }
+    
+    // Initialize sampler
+    auto sparams = llama_sampler_chain_default_params();
+    sparams.no_perf = false;
+    llama_sampler * smpl = llama_sampler_chain_init(sparams);
+    llama_sampler_chain_add(smpl, llama_sampler_init_greedy());
+    
+    // Prepare batch
+    llama_batch batch = llama_batch_get_one(prompt_tokens.data(), 
+                                            prompt_tokens.size());
+    
+    // Generation loop
+    for (int n_pos = 0; n_pos + batch.n_tokens < ctx_params.n_ctx; ) {
+        if (llama_decode(ctx, batch)) {
+            fprintf(stderr, "failed to decode\n");
+            return 1;
+        }
+        
+        n_pos += batch.n_tokens;
+        
+        // Sample next token
+        llama_token new_token_id = llama_sampler_sample(smpl, ctx, -1);
+        
+        if (llama_vocab_is_eog(vocab, new_token_id)) {
+            break;
+        }
+        
+        // Print token
+        char buf[128];
+        int n = llama_token_to_piece(vocab, new_token_id, buf, sizeof(buf), 0, true);
+        printf("%.*s", n, buf);
+        
+        // Prepare next batch
+        batch = llama_batch_get_one(&new_token_id, 1);
+    }
+    
+    // Cleanup
+    llama_sampler_free(smpl);
+    llama_free(ctx);
+    llama_model_free(model);
+    
+    return 0;
+}
+```
+</CodeGroup>
+
+## Core Data Types
+
+### Type Definitions
+
+```c
+typedef int32_t llama_pos;      // Position in sequence
+typedef int32_t llama_token;    // Token ID
+typedef int32_t llama_seq_id;   // Sequence ID
+
+typedef struct llama_memory_i * llama_memory_t;
+```
+
+### Core Structures
+
+```c
+struct llama_model;     // Opaque model handle
+struct llama_context;   // Opaque context handle
+struct llama_vocab;     // Opaque vocabulary handle
+struct llama_sampler;   // Opaque sampler handle
+```
+
+## Default Parameters
+
+Get default parameter structures:
+
+```c
+struct llama_model_params llama_model_default_params(void);
+struct llama_context_params llama_context_default_params(void);
+struct llama_sampler_chain_params llama_sampler_chain_default_params(void);
+struct llama_model_quantize_params llama_model_quantize_default_params(void);
+```
+
+## Query Functions
+
+Retrieve model and context information:
+
+<CodeGroup>
+```c Model Queries
+// Model properties
+int32_t llama_model_n_ctx_train(const struct llama_model * model);
+int32_t llama_model_n_embd(const struct llama_model * model);
+int32_t llama_model_n_layer(const struct llama_model * model);
+int32_t llama_model_n_head(const struct llama_model * model);
+uint64_t llama_model_n_params(const struct llama_model * model);
+uint64_t llama_model_size(const struct llama_model * model);
+
+// Model capabilities
+bool llama_model_has_encoder(const struct llama_model * model);
+bool llama_model_has_decoder(const struct llama_model * model);
+bool llama_model_is_recurrent(const struct llama_model * model);
+```
+
+```c Context Queries
+// Context configuration (actual values may differ from requested)
+uint32_t llama_n_ctx(const struct llama_context * ctx);
+uint32_t llama_n_batch(const struct llama_context * ctx);
+uint32_t llama_n_ubatch(const struct llama_context * ctx);
+uint32_t llama_n_seq_max(const struct llama_context * ctx);
+
+// Get associated model
+const struct llama_model * llama_get_model(const struct llama_context * ctx);
+```
+
+```c Vocabulary Queries
+// Vocabulary size
+int32_t llama_vocab_n_tokens(const struct llama_vocab * vocab);
+enum llama_vocab_type llama_vocab_type(const struct llama_vocab * vocab);
+
+// Get vocabulary from model
+const struct llama_vocab * llama_model_get_vocab(const struct llama_model * model);
+```
+</CodeGroup>
+
+## System Information
+
+```c
+const char * llama_print_system_info(void);
+
+bool llama_supports_mmap(void);
+bool llama_supports_mlock(void);
+bool llama_supports_gpu_offload(void);
+bool llama_supports_rpc(void);
+
+size_t llama_max_devices(void);
+```
+
+## Performance Monitoring
+
+```c
+struct llama_perf_context_data {
+    double t_start_ms;   // Absolute start time
+    double t_load_ms;    // Model loading time
+    double t_p_eval_ms;  // Prompt processing time
+    double t_eval_ms;    // Token generation time
+    
+    int32_t n_p_eval;    // Number of prompt tokens
+    int32_t n_eval;      // Number of generated tokens
+    int32_t n_reused;    // Number of graph reuses
+};
+
+struct llama_perf_context_data llama_perf_context(const struct llama_context * ctx);
+void llama_perf_context_print(const struct llama_context * ctx);
+void llama_perf_context_reset(struct llama_context * ctx);
+```
+
+## Constants
+
+```c
+#define LLAMA_DEFAULT_SEED 0xFFFFFFFF
+#define LLAMA_TOKEN_NULL -1
+
+#define LLAMA_FILE_MAGIC_GGLA 0x67676c61u  // 'ggla'
+#define LLAMA_FILE_MAGIC_GGSN 0x6767736eu  // 'ggsn'
+#define LLAMA_FILE_MAGIC_GGSQ 0x67677371u  // 'ggsq'
+```
+
+## Thread Safety
+
+<Note>
+The tokenization API (`llama_tokenize`, `llama_detokenize`, `llama_token_to_piece`) is thread-safe. Other APIs require external synchronization.
+</Note>
+
+## Error Handling
+
+Most functions return `NULL`, `-1`, `0`, or negative values to indicate errors. Always check return values:
+
+```c
+llama_model * model = llama_model_load_from_file(path, params);
+if (model == NULL) {
+    // Handle error: model file not found or invalid
+}
+
+llama_context * ctx = llama_init_from_model(model, ctx_params);
+if (ctx == NULL) {
+    // Handle error: context creation failed
+}
+
+int result = llama_decode(ctx, batch);
+if (result != 0) {
+    // Handle error: decoding failed
+    // result == 1: no KV slot available
+    // result == 2: aborted
+    // result < 0: fatal error
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Model Loading" icon="download" href="/api/model-loading">
+    Learn how to load models and configure parameters
+  </Card>
+  <Card title="Inference" icon="microchip" href="/api/inference">
+    Understand batching, decoding, and KV cache management
+  </Card>
+  <Card title="Sampling" icon="dice" href="/api/sampling">
+    Explore token sampling strategies and configuration
+  </Card>
+</CardGroup>

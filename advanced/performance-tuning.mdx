@@ -1,0 +1,485 @@
+---
+title: "Performance Tuning"
+description: "Optimize llama.cpp for maximum inference speed and efficiency"
+---
+
+# Performance Tuning
+
+Optimize llama.cpp inference performance across CPU, GPU, and hybrid configurations.
+
+## Quick Wins
+
+<CardGroup cols={2}>
+  <Card title="Use GPU" icon="microchip">
+    Offload layers to GPU with `--n-gpu-layers`
+  </Card>
+  <Card title="Optimize Threads" icon="gears">
+    Set `--threads` to physical CPU cores
+  </Card>
+  <Card title="Choose Quantization" icon="compress">
+    Use Q4_K_M or Q5_K_M for best speed/quality
+  </Card>
+  <Card title="Adjust Context" icon="window-maximize">
+    Reduce `--ctx-size` to minimum needed
+  </Card>
+</CardGroup>
+
+## GPU Acceleration
+
+### CUDA (NVIDIA)
+
+Offload layers to GPU:
+
+```bash
+llama-cli -m model.gguf --n-gpu-layers 32 -p "Hello"
+```
+
+<Tip>
+Set `--n-gpu-layers` to a large number (e.g., 200000) to offload all possible layers automatically.
+</Tip>
+
+Verify GPU usage in the startup logs:
+
+```text
+llama_model_load_internal: [cublas] offloading 60 layers to GPU
+llama_model_load_internal: [cublas] offloading output layer to GPU
+llama_model_load_internal: [cublas] total VRAM used: 17223 MB
+```
+
+### Metal (Apple Silicon)
+
+Metal is enabled by default on macOS:
+
+```bash
+llama-cli -m model.gguf --n-gpu-layers 999
+```
+
+Monitor GPU utilization:
+
+```bash
+sudo powermetrics --samplers gpu_power -i 1000
+```
+
+### ROCm (AMD)
+
+```bash
+llama-cli -m model.gguf --n-gpu-layers 32
+```
+
+Check GPU usage:
+
+```bash
+rocm-smi
+```
+
+## Thread Configuration
+
+<Warning>
+Incorrect thread settings are the #1 cause of slow inference!
+</Warning>
+
+### Finding Optimal Thread Count
+
+**Start conservative:**
+
+```bash
+# Start with 1 thread
+llama-cli -m model.gguf --threads 1 -p "Test"
+
+# Double until performance stops improving
+llama-cli -m model.gguf --threads 2 -p "Test"
+llama-cli -m model.gguf --threads 4 -p "Test"
+llama-cli -m model.gguf --threads 8 -p "Test"
+```
+
+**Recommended values:**
+
+- **CPU-only**: Physical CPU cores (not logical/hyperthreaded)
+- **With GPU**: 4-8 threads regardless of core count
+- **Server (parallel requests)**: 2-4 threads per request
+
+<Accordion title="Check physical core count">
+<Tabs>
+  <Tab title="Linux">
+    ```bash
+    lscpu | grep "Core(s) per socket"
+    ```
+  </Tab>
+  <Tab title="macOS">
+    ```bash
+    sysctl -n hw.physicalcpu
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    wmic cpu get NumberOfCores
+    ```
+  </Tab>
+</Tabs>
+</Accordion>
+
+### Batch Thread Configuration
+
+Separate threads for prompt processing:
+
+```bash
+llama-cli -m model.gguf \
+  --threads 4 \
+  --threads-batch 8
+```
+
+## Context Size Optimization
+
+**Context size directly impacts:**
+- Memory usage (RAM/VRAM)
+- Inference speed
+- Maximum conversation length
+
+<CodeGroup>
+```bash Minimal (fastest)
+llama-cli -m model.gguf --ctx-size 512
+```
+
+```bash Balanced
+llama-cli -m model.gguf --ctx-size 2048
+```
+
+```bash Large context
+llama-cli -m model.gguf --ctx-size 8192
+```
+</CodeGroup>
+
+<Info>
+Only use large context (&gt;4096) when absolutely necessary. Most tasks work well with 2048.
+</Info>
+
+## Batch Size Tuning
+
+**Logical batch size** (prompt processing parallelism):
+
+```bash
+llama-cli -m model.gguf --batch-size 512
+```
+
+**Physical batch size** (hardware limit):
+
+```bash
+llama-cli -m model.gguf --ubatch-size 256
+```
+
+**Guidelines:**
+- Larger batch = faster prompt processing, more memory
+- CPU: 512-2048
+- GPU: 512-2048 (depends on VRAM)
+- Server: 2048+ for parallel requests
+
+## Flash Attention
+
+Enables more efficient attention computation:
+
+```bash
+llama-cli -m model.gguf --flash-attn
+```
+
+<Note>
+Flash Attention is enabled by default (`auto`) when beneficial. Explicitly enable with `--flash-attn on`.
+</Note>
+
+## Quantization Selection
+
+| Quantization | Speed | Quality | Use Case |
+|--------------|-------|---------|----------|
+| Q2_K | Fastest | Lowest | Experimentation |
+| Q3_K_M | Very Fast | Low | Resource-constrained |
+| Q4_K_M | **Fast** | **Good** | **Recommended default** |
+| Q5_K_M | Moderate | Very Good | Quality-focused |
+| Q6_K | Slower | Excellent | Near-original quality |
+| Q8_0 | Slowest | Highest | Reference/evaluation |
+
+## Benchmark Example
+
+Real-world benchmark on NVIDIA A6000 (48GB VRAM), 7-core CPU, 30B Q4_0 model:
+
+| Configuration | Tokens/sec |
+|---------------|------------|
+| GPU only, wrong threads | &lt;0.1 |
+| CPU only (`-t 7`) | 1.7 |
+| GPU + 1 thread | 5.5 |
+| GPU + 7 threads | 8.7 |
+| GPU + 4 threads | **9.1** |
+
+<Warning>
+Note how too many threads (7) actually decreased performance compared to 4 threads!
+</Warning>
+
+## Hybrid CPU+GPU Inference
+
+For models larger than VRAM:
+
+```bash
+# Model requires 32GB, GPU has 24GB
+llama-cli -m model.gguf \
+  --n-gpu-layers 40 \
+  --threads 4
+```
+
+llama.cpp automatically splits:
+- 40 layers on GPU
+- Remaining layers on CPU
+
+## Memory Optimization
+
+### Memory Mapping
+
+**Enable mmap** (default, recommended):
+
+```bash
+llama-cli -m model.gguf --mmap
+```
+
+**Disable mmap** (faster startup, more RAM):
+
+```bash
+llama-cli -m model.gguf --no-mmap
+```
+
+### Memory Locking
+
+Prevent swapping (requires sufficient RAM):
+
+```bash
+llama-cli -m model.gguf --mlock
+```
+
+## Server Performance
+
+### Parallel Request Handling
+
+```bash
+llama-server -m model.gguf \
+  --ctx-size 4096 \
+  --n-parallel 4 \
+  --threads 4 \
+  --batch-size 2048
+```
+
+**Configuration guide:**
+- `--n-parallel`: Number of simultaneous requests (2-8)
+- `--threads`: Threads per request (2-4 recommended)
+- `--batch-size`: Must be &ge; ctx-size × n-parallel
+
+### Continuous Batching
+
+Enabled by default, improves throughput:
+
+```bash
+llama-server -m model.gguf \
+  --cont-batching \
+  --n-parallel 8
+```
+
+## Platform-Specific Tips
+
+<Tabs>
+  <Tab title="NVIDIA GPU">
+    **Optimal configuration:**
+    ```bash
+    llama-cli -m model.gguf \
+      --n-gpu-layers 999 \
+      --threads 4 \
+      --batch-size 512 \
+      --ubatch-size 256 \
+      --flash-attn
+    ```
+    
+    **Multi-GPU:**
+    ```bash
+    # Split evenly across 2 GPUs
+    llama-cli -m model.gguf \
+      --tensor-split 1,1 \
+      --n-gpu-layers 999
+    ```
+  </Tab>
+  <Tab title="Apple Silicon">
+    **Optimal configuration:**
+    ```bash
+    llama-cli -m model.gguf \
+      --n-gpu-layers 999 \
+      --threads 4 \
+      --batch-size 512
+    ```
+    
+    **For larger models:**
+    - Use Q4_K_M quantization
+    - Reduce context size to 2048
+    - Enable Metal automatically used
+  </Tab>
+  <Tab title="AMD GPU (ROCm)">
+    **Optimal configuration:**
+    ```bash
+    llama-cli -m model.gguf \
+      --n-gpu-layers 999 \
+      --threads 4 \
+      --batch-size 512
+    ```
+    
+    **Check VRAM usage:**
+    ```bash
+    rocm-smi --showmeminfo vram
+    ```
+  </Tab>
+  <Tab title="CPU-Only">
+    **Optimal configuration:**
+    ```bash
+    llama-cli -m model.gguf \
+      --threads $(nproc) \
+      --batch-size 512 \
+      --mlock
+    ```
+    
+    **For low RAM:**
+    - Use Q4_K_M or Q3_K_M
+    - Reduce context: `--ctx-size 512`
+    - Disable mlock
+  </Tab>
+</Tabs>
+
+## Profiling and Monitoring
+
+### Built-in Performance Stats
+
+Enable timing information:
+
+```bash
+llama-cli -m model.gguf --perf -p "Test prompt"
+```
+
+Outputs:
+- Prompt evaluation time
+- Token generation time
+- Tokens per second
+
+### Server Metrics
+
+Query server metrics endpoint:
+
+```bash
+curl http://localhost:8080/metrics
+```
+
+Returns:
+- Request counts
+- Processing times
+- KV cache usage
+- Queue statistics
+
+### Benchmark Tool
+
+Systematic performance testing:
+
+```bash
+llama-bench -m model.gguf \
+  --n-prompt 512 \
+  --n-gen 128 \
+  -ngl 32 \
+  -t 4,8,16
+```
+
+[Learn more about benchmarking →](/api/tools/llama-bench)
+
+## Common Performance Issues
+
+<AccordionGroup>
+  <Accordion title="Very slow generation (&lt;1 tok/s)">
+    **Likely causes:**
+    - Too many threads (oversaturation)
+    - No GPU acceleration
+    - Context size too large
+    
+    **Solutions:**
+    - Set `--threads 1` and gradually increase
+    - Enable GPU layers: `--n-gpu-layers 32`
+    - Reduce context: `--ctx-size 2048`
+  </Accordion>
+  
+  <Accordion title="Out of memory errors">
+    **Solutions:**
+    - Use smaller quantization (Q4_K_M instead of Q8_0)
+    - Reduce context size: `--ctx-size 1024`
+    - Reduce batch size: `--batch-size 256`
+    - Offload fewer layers: `--n-gpu-layers 20`
+    - Enable mmap: `--mmap`
+  </Accordion>
+  
+  <Accordion title="GPU underutilized">
+    **Check:**
+    - Are layers offloaded? (check startup logs)
+    - Is batch size large enough? Try 512 or 1024
+    - Are you using optimal quantization? (Q4_K_M recommended)
+    
+    **Optimize:**
+    ```bash
+    llama-cli -m model.gguf \
+      --n-gpu-layers 999 \
+      --batch-size 1024 \
+      --ubatch-size 512
+    ```
+  </Accordion>
+  
+  <Accordion title="Server slow with multiple requests">
+    **Solutions:**
+    - Increase `--n-parallel 8`
+    - Ensure batch size &ge; ctx-size × n-parallel
+    - Reduce per-request threads: `--threads 2`
+    - Enable continuous batching: `--cont-batching`
+  </Accordion>
+</AccordionGroup>
+
+## Advanced Optimizations
+
+### CPU Affinity
+
+Bind threads to specific cores:
+
+```bash
+llama-cli -m model.gguf \
+  --cpu-mask 0xFF \
+  --cpu-strict 1
+```
+
+### Process Priority
+
+Increase process priority:
+
+```bash
+llama-cli -m model.gguf --prio 2
+```
+
+Levels: `-1` (low), `0` (normal), `1` (medium), `2` (high), `3` (realtime)
+
+### Polling Level
+
+Reduce latency with busy-waiting:
+
+```bash
+llama-cli -m model.gguf --poll 100
+```
+
+Range: 0-100 (0=no polling, 100=full busy-wait)
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Quantization Guide" icon="compress" href="/concepts/quantization">
+    Learn about quantization types and tradeoffs
+  </Card>
+  <Card title="Backend Configuration" icon="microchip" href="/concepts/backends">
+    Configure GPU backends for your hardware
+  </Card>
+  <Card title="Benchmarking" icon="chart-line" href="/api/tools/llama-bench">
+    Measure and compare performance
+  </Card>
+  <Card title="Server Tuning" icon="server" href="/api/tools/llama-server">
+    Optimize server for production
+  </Card>
+</CardGroup>

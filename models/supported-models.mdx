@@ -1,0 +1,199 @@
+---
+title: Supported Models
+description: Comprehensive list of LLM architectures supported by llama.cpp
+---
+
+llama.cpp supports a wide variety of LLM architectures, both text-only and multimodal models. Typically, finetunes of the base models listed below are also supported.
+
+<Note>
+For instructions on adding support for new models, see the [HOWTO-add-model.md](https://github.com/ggml-org/llama.cpp/blob/master/docs/development/HOWTO-add-model.md) guide in the llama.cpp repository.
+</Note>
+
+## Text-Only Models
+
+The following text-generation models are fully supported for inference:
+
+<Accordion title="LLaMA Family">
+**LLaMA, LLaMA 2, and LLaMA 3** - Meta's foundational large language models
+
+- LLaMA (original 7B, 13B, 33B, 65B)
+- LLaMA 2 (7B, 13B, 70B)
+- LLaMA 3 (8B, 70B, and larger variants)
+
+These models form the foundation of llama.cpp and provide excellent performance across various tasks.
+</Accordion>
+
+<Accordion title="Mistral and Mixtral">
+**Mistral AI Models** - High-performance open models
+
+- [Mistral 7B](https://huggingface.co/mistralai/Mistral-7B-v0.1) - Efficient 7B parameter model
+- [Mixtral MoE](https://huggingface.co/models?search=mistral-ai/Mixtral) - Mixture of Experts architecture
+
+Mistral models are known for their strong performance relative to model size.
+</Accordion>
+
+<Accordion title="Google Models">
+**Gemma** - Google's open-source language models
+
+- [Gemma](https://ai.google.dev/gemma) - Available in multiple sizes
+- Optimized for efficiency and safety
+</Accordion>
+
+<Accordion title="Chinese Language Models">
+**Specialized Chinese LLMs**
+
+- [Chinese LLaMA / Alpaca](https://github.com/ymcui/Chinese-LLaMA-Alpaca)
+- [Chinese LLaMA-2 / Alpaca-2](https://github.com/ymcui/Chinese-LLaMA-Alpaca-2)
+- [Baichuan 1 & 2](https://huggingface.co/models?search=baichuan-inc/Baichuan)
+- [Qwen models](https://huggingface.co/models?search=Qwen/Qwen)
+- [ChatGLM3-6b](https://huggingface.co/THUDM/chatglm3-6b)
+- [ChatGLM4-9b](https://huggingface.co/THUDM/glm-4-9b)
+- [Yi models](https://huggingface.co/models?search=01-ai/Yi)
+</Accordion>
+
+<Accordion title="Code Models">
+**Specialized for Code Generation**
+
+- [Starcoder models](https://github.com/ggml-org/llama.cpp/pull/3187)
+- [Refact](https://huggingface.co/smallcloudai/Refact-1_6B-fim)
+- [CodeShell](https://github.com/WisdomShell/codeshell)
+- [Granite models](https://huggingface.co/collections/ibm-granite/granite-code-models-6624c5cec322e4c148c8b330)
+</Accordion>
+
+<Accordion title="Other Notable Models">
+**Additional Supported Architectures**
+
+- [Falcon](https://huggingface.co/models?search=tiiuae/falcon) - TII UAE's high-performance models
+- [Phi models](https://huggingface.co/models?search=microsoft/phi) - Microsoft's small language models
+- [GPT-2](https://huggingface.co/gpt2) - OpenAI's foundational model
+- [BERT](https://github.com/ggml-org/llama.cpp/pull/5423) - Bidirectional encoder
+- [Bloom](https://github.com/ggml-org/llama.cpp/pull/3553) - Multilingual model
+- [MPT](https://github.com/ggml-org/llama.cpp/pull/3417) - MosaicML Pretrained Transformer
+- [StableLM models](https://huggingface.co/stabilityai)
+- [Deepseek models](https://huggingface.co/models?search=deepseek-ai/deepseek)
+- [GPT-NeoX](https://github.com/EleutherAI/gpt-neox) + [Pythia](https://github.com/EleutherAI/pythia)
+</Accordion>
+
+<Accordion title="Mixture of Experts (MoE)">
+**MoE Architectures**
+
+- [Mixtral MoE](https://huggingface.co/models?search=mistral-ai/Mixtral)
+- [DBRX](https://huggingface.co/databricks/dbrx-instruct)
+- [Jamba](https://huggingface.co/ai21labs)
+- [PhiMoE](https://github.com/ggml-org/llama.cpp/pull/11003)
+- [Snowflake-Arctic MoE](https://huggingface.co/collections/Snowflake/arctic-66290090abe542894a5ac520)
+- [OLMoE](https://huggingface.co/allenai/OLMoE-1B-7B-0924)
+</Accordion>
+
+<Accordion title="State Space Models">
+**Alternative Architectures**
+
+- [Mamba](https://github.com/state-spaces/mamba) - State space model
+- [FalconMamba Models](https://huggingface.co/collections/tiiuae/falconmamba-7b-66b9a580324dd1598b0f6d4a)
+- [RWKV-6](https://github.com/BlinkDL/RWKV-LM)
+- [RWKV-7](https://huggingface.co/collections/shoumenchougou/rwkv7-gxx-gguf)
+</Accordion>
+
+<Accordion title="Small Language Models">
+**Efficient Small Models**
+
+- [SmolLM](https://huggingface.co/collections/HuggingFaceTB/smollm-6695016cad7167254ce15966)
+- [Open Elm models](https://huggingface.co/collections/apple/openelm-instruct-models-6619ad295d7ae9f868b759ca)
+- [GLMEdge-1.5b](https://huggingface.co/THUDM/glm-edge-1.5b-chat)
+- [GLMEdge-4b](https://huggingface.co/THUDM/glm-edge-4b-chat)
+</Accordion>
+
+### Complete Text Model List
+
+For a comprehensive and up-to-date list of all supported text models, including:
+
+- Koala, Aquila, Vigogne (French)
+- InternLM2, Orion, Xverse
+- Command-R models, SEA-LION
+- GritLM, OLMo, OLMo 2
+- Poro, Smaug, Grok-1
+- Flan T5, Bitnet b1.58
+- Jais, Bielik, Trillion
+- Ling, LFM2, Hunyuan
+- And many more...
+
+Visit the [llama.cpp README](https://github.com/ggml-org/llama.cpp#models) for the complete list.
+
+## Multimodal Models
+
+llama.cpp supports multimodal models that can process both text and images:
+
+<Accordion title="LLaVA Family">
+**Vision-Language Models**
+
+- [LLaVA 1.5 models](https://huggingface.co/collections/liuhaotian/llava-15-653aac15d994e992e2677a7e)
+- [LLaVA 1.6 models](https://huggingface.co/collections/liuhaotian/llava-16-65b9e40155f60fd046a5ccf2)
+- [BakLLaVA](https://huggingface.co/models?search=SkunkworksAI/Bakllava)
+
+LLaVA models combine vision encoders with language models for visual understanding tasks.
+</Accordion>
+
+<Accordion title="Other Vision Models">
+**Additional Multimodal Architectures**
+
+- [Qwen2-VL](https://huggingface.co/collections/Qwen/qwen2-vl-66cee7455501d7126940800d)
+- [Mini CPM](https://huggingface.co/models?search=MiniCPM)
+- [Yi-VL](https://huggingface.co/models?search=Yi-VL)
+- [Moondream](https://huggingface.co/vikhyatk/moondream2)
+- [Bunny](https://github.com/BAAI-DCAI/Bunny)
+- [Obsidian](https://huggingface.co/NousResearch/Obsidian-3B-V0.5)
+- [ShareGPT4V](https://huggingface.co/models?search=Lin-Chen/ShareGPT4V)
+- [MobileVLM 1.7B/3B models](https://huggingface.co/models?search=mobileVLM)
+- [GLM-EDGE](https://huggingface.co/models?search=glm-edge)
+- [LFM2-VL](https://huggingface.co/collections/LiquidAI/lfm2-vl-68963bbc84a610f7638d5ffa)
+</Accordion>
+
+<Note>
+Multimodal support in `llama-server` is documented in the [multimodal documentation](https://github.com/ggml-org/llama.cpp/blob/master/docs/multimodal.md).
+</Note>
+
+## Model Compatibility
+
+### Finetunes
+
+Most finetunes of the base models listed above are automatically supported. This includes:
+
+- Instruction-tuned variants (e.g., `-Instruct`, `-Chat`)
+- Domain-specific adaptations
+- LoRA-merged models
+- RLHF-trained variants
+
+### Format Requirements
+
+All models must be in **GGUF format** to work with llama.cpp. Models in other formats (PyTorch, SafeTensors, etc.) need to be converted first.
+
+See [Converting Models](/models/converting-models) for details on the conversion process.
+
+## Finding Models
+
+<CodeGroup>
+```bash Hugging Face Search
+# Search for GGUF models on Hugging Face
+https://huggingface.co/models?library=gguf&sort=trending
+
+# Search for specific model families
+https://huggingface.co/models?sort=trending&search=llama+gguf
+```
+
+```bash Direct Download
+# Use -hf flag to download and run directly
+llama-cli -hf ggml-org/gemma-3-1b-it-GGUF
+llama-server -hf ggml-org/gemma-3-1b-it-GGUF
+```
+</CodeGroup>
+
+## Performance Considerations
+
+Different model architectures have varying performance characteristics:
+
+- **Smaller models** (1B-7B): Run efficiently on consumer hardware, suitable for edge deployment
+- **Medium models** (13B-34B): Balance between capability and resource requirements
+- **Large models** (70B+): Require substantial VRAM or RAM, best quality results
+- **MoE models**: Larger parameter counts but efficient inference due to sparse activation
+
+For optimal performance, consider using [quantized models](/models/quantizing-models) to reduce memory requirements while maintaining quality.

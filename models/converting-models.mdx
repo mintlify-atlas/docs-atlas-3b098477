@@ -1,0 +1,373 @@
+---
+title: Converting Models
+description: Convert models from PyTorch, SafeTensors, and other formats to GGUF
+---
+
+llama.cpp requires models to be in GGUF format. If you have a model in PyTorch, SafeTensors, or another format, you'll need to convert it first.
+
+## Overview
+
+The conversion process transforms model weights and metadata from Hugging Face format (or other formats) into the GGUF format used by llama.cpp.
+
+<Note>
+**When to convert:**
+- You have a model in PyTorch (`.bin`, `.pt`) or SafeTensors (`.safetensors`) format
+- You want to use a model from Hugging Face that isn't available in GGUF
+- You've fine-tuned a model and need to convert it for inference
+
+**When to skip:**
+- The model is already available in GGUF format on Hugging Face
+- You can use a pre-converted version
+</Note>
+
+## Quick Start
+
+The main conversion script is `convert_hf_to_gguf.py`:
+
+<CodeGroup>
+```bash Basic Conversion
+# Install Python dependencies
+python3 -m pip install -r requirements.txt
+
+# Convert a Hugging Face model
+python3 convert_hf_to_gguf.py /path/to/model/
+
+# Output will be: /path/to/model/ggml-model-f16.gguf
+```
+
+```bash With Options
+# Convert with F32 precision (larger file)
+python3 convert_hf_to_gguf.py /path/to/model/ --outtype f32
+
+# Convert to specific output file
+python3 convert_hf_to_gguf.py /path/to/model/ --outfile my-model.gguf
+
+# Vocab only (for tokenizer testing)
+python3 convert_hf_to_gguf.py /path/to/model/ --vocab-only
+```
+</CodeGroup>
+
+## Step-by-Step Conversion Process
+
+<Steps>
+  <Step title="Obtain the Model">
+    First, download the model in its original format from Hugging Face or another source.
+    
+    ```bash
+    # Using git LFS
+    git lfs install
+    git clone https://huggingface.co/meta-llama/Llama-3.1-8B
+    
+    # Or use huggingface-cli
+    huggingface-cli download meta-llama/Llama-3.1-8B --local-dir ./models/llama-3.1-8b
+    ```
+    
+    You should see files like:
+    - `config.json`
+    - `tokenizer.json` / `tokenizer.model`
+    - `model-*.safetensors` or `pytorch_model-*.bin`
+  </Step>
+  
+  <Step title="Install Dependencies">
+    Install the required Python packages:
+    
+    ```bash
+    cd llama.cpp
+    python3 -m pip install -r requirements.txt
+    ```
+    
+    Key dependencies:
+    - `torch` - PyTorch for loading model weights
+    - `transformers` - Hugging Face transformers library
+    - `numpy` - Numerical operations
+    - `gguf` - GGUF format library
+  </Step>
+  
+  <Step title="Run Conversion">
+    Convert the model to GGUF format:
+    
+    ```bash
+    python3 convert_hf_to_gguf.py ./models/llama-3.1-8b/
+    ```
+    
+    The script will:
+    1. Load the model configuration
+    2. Read model weights
+    3. Convert tensors to GGUF format
+    4. Save the output file
+    
+    This may take several minutes depending on model size.
+  </Step>
+  
+  <Step title="Verify Conversion">
+    Test the converted model:
+    
+    ```bash
+    ./llama-cli -m ./models/llama-3.1-8b/ggml-model-f16.gguf -p "Hello" -n 20
+    ```
+    
+    If the model generates coherent text, the conversion was successful.
+  </Step>
+</Steps>
+
+## Conversion Script Reference
+
+### convert_hf_to_gguf.py
+
+The primary conversion script for Hugging Face models.
+
+<Accordion title="Common Options">
+```bash
+python3 convert_hf_to_gguf.py [options] <model_directory>
+
+Positional arguments:
+  model_directory       Path to the model directory (contains config.json)
+
+Options:
+  --vocab-only          Extract only the vocabulary/tokenizer
+  --outfile FILE        Output file path (default: ggml-model-f16.gguf)
+  --outtype TYPE        Output data type: f32, f16, bf16 (default: f16)
+  --bigendian          Use big-endian format (default: little-endian)
+  --model-name NAME    Model name to embed in metadata
+  --verbose            Increase verbosity
+  --help               Show help message
+```
+</Accordion>
+
+<Accordion title="Output Types">
+- **f16** (default): 16-bit floating point - good balance of size and quality
+- **f32**: 32-bit floating point - full precision, largest file
+- **bf16**: BFloat16 - alternative 16-bit format, same size as f16
+
+For most users, f16 is the best choice as it maintains quality while reducing file size by ~50% compared to f32.
+</Accordion>
+
+### Other Conversion Scripts
+
+<Accordion title="convert_lora_to_gguf.py">
+Convert LoRA (Low-Rank Adaptation) adapters to GGUF format:
+
+```bash
+python3 convert_lora_to_gguf.py ./path/to/lora/
+```
+
+Useful for fine-tuned models using the LoRA technique. See the [GGUF-my-LoRA space](https://huggingface.co/spaces/ggml-org/gguf-my-lora) for online conversion.
+</Accordion>
+
+<Accordion title="convert_llama_ggml_to_gguf.py">
+Convert old GGML format to current GGUF format:
+
+```bash
+python3 convert_llama_ggml_to_gguf.py ./old-model.ggml
+```
+
+Only needed for very old llama.cpp models from before the GGUF format was introduced.
+</Accordion>
+
+## Supported Model Architectures
+
+The conversion script automatically detects the model architecture from `config.json`. Supported architectures include:
+
+<CodeGroup>
+```text LLaMA Family
+- LLaMA (meta-llama/Llama-*)
+- LLaMA 2 (meta-llama/Llama-2-*)
+- LLaMA 3 (meta-llama/Llama-3-*)
+- Code Llama variants
+```
+
+```text Mistral Family
+- Mistral (mistralai/Mistral-*)
+- Mixtral MoE (mistralai/Mixtral-*)
+```
+
+```text Other Popular Models
+- Qwen / Qwen2
+- Phi / Phi-2 / Phi-3
+- Gemma / Gemma 2
+- GPT-2 / GPT-J / GPT-NeoX
+- Falcon
+- Baichuan
+- And 60+ more architectures
+```
+</CodeGroup>
+
+For a complete list, see [Supported Models](/models/supported-models).
+
+## Advanced Conversion
+
+### Converting from ModelScope
+
+Models from ModelScope can be converted the same way:
+
+```bash
+# Download from ModelScope
+modelscope download --model <model_id> --local_dir ./models/model-name
+
+# Convert as normal
+python3 convert_hf_to_gguf.py ./models/model-name/
+```
+
+### Vocabulary-Only Conversion
+
+For testing tokenizers or when you only need vocabulary:
+
+```bash
+python3 convert_hf_to_gguf.py ./model/ --vocab-only --outfile vocab.gguf
+```
+
+This creates a much smaller file containing only the tokenizer information.
+
+### Custom Metadata
+
+Embed custom metadata during conversion:
+
+```bash
+python3 convert_hf_to_gguf.py ./model/ --model-name "My Custom Model v1.2"
+```
+
+The metadata can be viewed with `llama-cli --model-info`.
+
+## Online Conversion Tools
+
+If you prefer not to set up a local environment, use these Hugging Face spaces:
+
+<Accordion title="GGUF-my-repo">
+[GGUF-my-repo](https://huggingface.co/spaces/ggml-org/gguf-my-repo) - Official converter and quantizer
+
+**Features:**
+- Convert any Hugging Face model to GGUF
+- Automatically quantize to multiple formats
+- No local setup required
+- Results published to your Hugging Face account
+
+**How to use:**
+1. Visit the space
+2. Enter the model repository name
+3. Select quantization options
+4. Click "Submit"
+5. Download the resulting GGUF files
+
+<Note>
+The space is synced from llama.cpp main branch every 6 hours, so it uses recent conversion code.
+</Note>
+</Accordion>
+
+<Accordion title="GGUF-my-LoRA">
+[GGUF-my-LoRA](https://huggingface.co/spaces/ggml-org/gguf-my-lora) - Convert LoRA adapters
+
+Specialized tool for converting LoRA fine-tuned models. See [discussion](https://github.com/ggml-org/llama.cpp/discussions/10123) for details.
+</Accordion>
+
+## Troubleshooting
+
+<Accordion title="ModuleNotFoundError: No module named 'torch'">
+**Solution:**
+Install requirements:
+
+```bash
+python3 -m pip install -r requirements.txt
+```
+</Accordion>
+
+<Accordion title="Model architecture not recognized">
+**Symptoms:**
+```
+Error: Unknown model architecture
+```
+
+**Solutions:**
+1. Check if your model architecture is supported in [Supported Models](/models/supported-models)
+2. Update llama.cpp to the latest version
+3. If it's a new architecture, it may not be supported yet
+
+For adding new model support, see [HOWTO-add-model.md](https://github.com/ggml-org/llama.cpp/blob/master/docs/development/HOWTO-add-model.md).
+</Accordion>
+
+<Accordion title="Out of memory during conversion">
+**Solution:**
+The conversion process loads the entire model into memory. For large models (70B+):
+
+- Use a machine with sufficient RAM (at least 2x the model size)
+- Close other applications
+- Consider using the [GGUF-my-repo](https://huggingface.co/spaces/ggml-org/gguf-my-repo) online tool instead
+</Accordion>
+
+<Accordion title="Conversion is very slow">
+**This is normal** for large models. Expected times:
+
+- 7B model: 2-5 minutes
+- 13B model: 5-10 minutes
+- 70B model: 30-60 minutes
+
+The script shows progress as it processes tensors.
+</Accordion>
+
+<Accordion title="TypeError or tensor shape errors">
+**Solution:**
+Ensure you have the latest version of llama.cpp:
+
+```bash
+git pull origin master
+```
+
+Model formats change, and older conversion scripts may not work with newer models.
+</Accordion>
+
+## After Conversion
+
+Once you have a GGUF file, you can:
+
+1. **Use it directly** if the F16 size is acceptable:
+   ```bash
+   ./llama-cli -m model.gguf
+   ```
+
+2. **Quantize it** to reduce size (recommended):
+   ```bash
+   ./llama-quantize model.gguf model-q4.gguf Q4_K_M
+   ```
+   See [Quantizing Models](/models/quantizing-models) for details.
+
+3. **Share it** on Hugging Face for others to use
+
+## Example: Complete Workflow
+
+Here's a complete example converting and using a model:
+
+<CodeGroup>
+```bash Download and Convert
+# 1. Clone the repository
+huggingface-cli download meta-llama/Llama-3.1-8B \
+  --local-dir ./models/llama-3.1-8b
+
+# 2. Install dependencies
+cd llama.cpp
+python3 -m pip install -r requirements.txt
+
+# 3. Convert to GGUF
+python3 convert_hf_to_gguf.py ../models/llama-3.1-8b/
+
+# 4. Test the model
+./llama-cli -m ../models/llama-3.1-8b/ggml-model-f16.gguf \
+  -p "Explain quantum computing in simple terms" \
+  -n 100
+```
+
+```bash Convert and Quantize
+# After conversion, quantize for smaller size
+./llama-quantize \
+  ../models/llama-3.1-8b/ggml-model-f16.gguf \
+  ../models/llama-3.1-8b/ggml-model-Q4_K_M.gguf \
+  Q4_K_M
+
+# Now the model is ready for production use
+./llama-server -m ../models/llama-3.1-8b/ggml-model-Q4_K_M.gguf
+```
+</CodeGroup>
+
+## Next Steps
+
+- Learn about [Quantizing Models](/models/quantizing-models) to reduce model size
+- See [Supported Models](/models/supported-models) for architecture compatibility
+- Read about [Obtaining Models](/models/obtaining-models) to find pre-converted GGUF files

@@ -1,0 +1,282 @@
+---
+title: Obtaining Models
+description: How to download and acquire models for use with llama.cpp
+---
+
+There are several ways to obtain models for use with llama.cpp. All models must be in GGUF format to work with llama.cpp.
+
+## Quick Start: Direct Download with -hf Flag
+
+The easiest way to use models is with the `-hf` flag, which automatically downloads models from Hugging Face:
+
+<CodeGroup>
+```bash CLI Usage
+# Download and run a model directly
+llama-cli -hf ggml-org/gemma-3-1b-it-GGUF
+
+# Specify a particular quantization
+llama-cli -hf ggml-org/gemma-3-1b-it-GGUF:Q4_K_M
+```
+
+```bash Server Usage
+# Launch server with auto-download
+llama-server -hf ggml-org/gemma-3-1b-it-GGUF
+
+# Server with specific quant
+llama-server -hf ggml-org/gemma-3-1b-it-GGUF:Q8_0
+```
+</CodeGroup>
+
+<Note>
+The `-hf` flag downloads models to your local cache and reuses them on subsequent runs. You don't need to download the model manually.
+</Note>
+
+## Finding Models on Hugging Face
+
+Hugging Face hosts thousands of GGUF-format models compatible with llama.cpp:
+
+<Steps>
+  <Step title="Browse GGUF Models">
+    Visit the [GGUF models page](https://huggingface.co/models?library=gguf&sort=trending) to see trending models.
+    
+    Popular collections:
+    - [Trending GGUF models](https://huggingface.co/models?library=gguf&sort=trending)
+    - [LLaMA models](https://huggingface.co/models?sort=trending&search=llama+gguf)
+    - Official llama.cpp models: [ggml-org](https://huggingface.co/ggml-org)
+  </Step>
+  
+  <Step title="Choose a Model">
+    Select a model based on your needs:
+    
+    - **Size**: Smaller models (1B-7B) run on consumer hardware, larger models (70B+) need more resources
+    - **Quantization**: Lower quantization (Q4, Q5) = smaller file, higher (Q8, F16) = better quality
+    - **Task**: Some models are optimized for chat, coding, or specific domains
+  </Step>
+  
+  <Step title="Use with llama.cpp">
+    Once you've found a model, use it with the `-hf` flag:
+    
+    ```bash
+    llama-cli -hf <username>/<repository>
+    ```
+  </Step>
+</Steps>
+
+### Example Model Repositories
+
+<Accordion title="Recommended GGUF Repositories">
+- **ggml-org/gemma-3-1b-it-GGUF** - Small, efficient instruction model
+- **TheBloke repositories** - Large collection of quantized models (community contributor)
+- **Original model authors** - Many official models now include GGUF files
+- **bartowski** - Another popular GGUF converter with many models
+</Accordion>
+
+## Manual Download from Hugging Face
+
+If you prefer to download models manually:
+
+<Steps>
+  <Step title="Navigate to Model Repository">
+    Go to the model's Hugging Face page (e.g., `https://huggingface.co/ggml-org/gemma-3-1b-it-GGUF`)
+  </Step>
+  
+  <Step title="Browse Files">
+    Click on the "Files and versions" tab to see all available files.
+    
+    Look for `.gguf` files - these are ready to use with llama.cpp.
+  </Step>
+  
+  <Step title="Download GGUF File">
+    Download the specific quantization you want:
+    
+    - `*-Q4_K_M.gguf` - Good balance (recommended for most users)
+    - `*-Q5_K_M.gguf` - Higher quality
+    - `*-Q8_0.gguf` - Near-original quality
+    - `*-f16.gguf` - Full precision
+  </Step>
+  
+  <Step title="Run Locally">
+    Use the downloaded file with llama.cpp:
+    
+    ```bash
+    llama-cli -m /path/to/model.gguf
+    ```
+  </Step>
+</Steps>
+
+## Alternative Model Sources
+
+### ModelScope (China)
+
+For users in China or preferring ModelScope, you can switch the model endpoint:
+
+```bash
+# Set environment variable to use ModelScope
+export MODEL_ENDPOINT=https://www.modelscope.cn/
+
+# Then use -hf flag as normal
+llama-cli -hf username/model-name
+```
+
+<Note>
+The `MODEL_ENDPOINT` environment variable tells llama.cpp where to download models from. By default, it uses Hugging Face.
+</Note>
+
+### Other Sources
+
+You can also obtain GGUF models from:
+
+- **Ollama Library**: Use [ollama-dl](https://github.com/akx/ollama-dl) to download Ollama models for use with llama.cpp
+- **Direct conversions**: Convert your own models using the [conversion tools](/models/converting-models)
+- **Research institutions**: Some organizations host their own model repositories
+
+## Pre-quantized vs Original Models
+
+<Accordion title="Pre-quantized GGUF Models (Recommended)">
+**Pros:**
+- Ready to use immediately
+- No conversion needed
+- Multiple quantization levels available
+- Smaller download size
+
+**Cons:**
+- May not have the exact quantization you want
+- Depends on someone else doing the quantization
+
+**Use when:** You want to get started quickly and the available quantizations meet your needs.
+</Accordion>
+
+<Accordion title="Original Format Models">
+**Pros:**
+- You control the quantization process
+- Can use importance matrix for better quality
+- Can experiment with different quantization levels
+
+**Cons:**
+- Requires conversion step
+- Larger initial download
+- Takes time to quantize
+
+**Use when:** You need specific quantization settings or want maximum control over quality.
+</Accordion>
+
+## Verifying Model Downloads
+
+<Steps>
+  <Step title="Check File Size">
+    Ensure the downloaded file size matches the expected size on the model page.
+  </Step>
+  
+  <Step title="Test the Model">
+    Run a simple test to verify the model works:
+    
+    ```bash
+    llama-cli -m model.gguf -p "Hello, how are you?" -n 50
+    ```
+  </Step>
+  
+  <Step title="Check Output">
+    Verify the model generates coherent text appropriate to its training.
+  </Step>
+</Steps>
+
+## Model Storage Locations
+
+When using the `-hf` flag, models are cached locally:
+
+<CodeGroup>
+```bash Linux/macOS
+# Default Hugging Face cache location
+~/.cache/huggingface/hub/
+
+# Models are stored with their repository structure
+~/.cache/huggingface/hub/models--<username>--<repo>/
+```
+
+```bash Windows
+# Default cache location
+C:\Users\<username>\.cache\huggingface\hub\
+```
+</CodeGroup>
+
+You can also manually place models anywhere and reference them with the `-m` flag:
+
+```bash
+llama-cli -m /custom/path/to/model.gguf
+```
+
+## Model Selection Guidelines
+
+### By Hardware
+
+| Hardware | Recommended Model Size | Quantization |
+|----------|----------------------|---------------|
+| Mobile/Low-end | 1B-3B | Q4_K_M, Q4_0 |
+| Laptop/Desktop (8-16GB RAM) | 7B-13B | Q4_K_M, Q5_K_M |
+| High-end Desktop (32GB+ RAM) | 13B-34B | Q5_K_M, Q6_K |
+| Workstation/Server (64GB+ RAM) | 70B+ | Q4_K_M, Q5_K_M |
+
+### By Use Case
+
+<Accordion title="Chat/Assistant">
+- LLaMA 3 Instruct variants
+- Mistral Instruct
+- Gemma IT models
+- Qwen Chat models
+
+Look for models with `-Instruct`, `-IT`, or `-Chat` in the name.
+</Accordion>
+
+<Accordion title="Code Generation">
+- StarCoder models
+- Granite Code models
+- CodeLlama variants
+- Qwen-Coder
+
+These are specifically trained on code and perform better for programming tasks.
+</Accordion>
+
+<Accordion title="Multilingual">
+- Bloom
+- Qwen (strong Chinese support)
+- mGPT
+- Aya models
+
+Choose based on your target languages.
+</Accordion>
+
+## Next Steps
+
+Once you have obtained a model:
+
+1. If it's already in GGUF format, you can use it directly
+2. If it's in another format, see [Converting Models](/models/converting-models)
+3. To reduce size further, see [Quantizing Models](/models/quantizing-models)
+4. Check [Supported Models](/models/supported-models) for compatibility information
+
+## Troubleshooting
+
+<Accordion title="Download fails with -hf flag">
+**Possible causes:**
+- Network connectivity issues
+- Invalid repository name
+- Repository is private
+
+**Solution:**
+Try manual download from Hugging Face website, or check the repository exists and is public.
+</Accordion>
+
+<Accordion title="Model file is corrupted">
+**Symptoms:**
+- Load errors
+- Unexpected behavior
+- Crashes
+
+**Solution:**
+Re-download the model. Check file size matches expected size.
+</Accordion>
+
+<Accordion title="Out of memory when loading">
+**Solution:**
+Use a smaller model or lower quantization (e.g., Q4_K_M instead of Q8_0).
+</Accordion>

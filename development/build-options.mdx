@@ -1,0 +1,433 @@
+---
+title: CMake Build Options
+description: Complete reference for CMake configuration options in llama.cpp
+---
+
+## Overview
+
+llama.cpp provides extensive CMake options to customize your build. Options are specified with `-D` flag:
+
+```bash
+cmake -B build -DOPTION_NAME=VALUE
+```
+
+## General Options
+
+### Build Type
+
+| Option | Values | Default | Description |
+|--------|--------|---------|-------------|
+| `CMAKE_BUILD_TYPE` | `Debug`, `Release`, `RelWithDebInfo`, `MinSizeRel` | `Release` | Build configuration type |
+| `BUILD_SHARED_LIBS` | `ON`, `OFF` | Platform-dependent | Build shared libraries instead of static |
+| `GGML_STATIC` | `ON`, `OFF` | `OFF` | Static link libraries |
+
+```bash Debug build
+cmake -B build -DCMAKE_BUILD_TYPE=Debug
+cmake --build build
+```
+
+```bash Static build
+cmake -B build -DBUILD_SHARED_LIBS=OFF
+cmake --build build --config Release
+```
+
+### Optimization Options
+
+| Option | Values | Default | Description |
+|--------|--------|---------|-------------|
+| `GGML_NATIVE` | `ON`, `OFF` | `ON` | Optimize for current system CPU |
+| `GGML_LTO` | `ON`, `OFF` | `OFF` | Enable link-time optimization |
+| `GGML_CCACHE` | `ON`, `OFF` | `ON` | Use ccache if available |
+
+<Note>
+  `GGML_NATIVE=ON` optimizes for your current CPU but may not work on other systems.
+</Note>
+
+```bash Portable build (no native optimization)
+cmake -B build -DGGML_NATIVE=OFF
+cmake --build build --config Release
+```
+
+### Build Targets
+
+| Option | Values | Default | Description |
+|--------|--------|---------|-------------|
+| `LLAMA_BUILD_TESTS` | `ON`, `OFF` | `ON` (standalone) | Build test suite |
+| `LLAMA_BUILD_TOOLS` | `ON`, `OFF` | `ON` (standalone) | Build command-line tools |
+| `LLAMA_BUILD_EXAMPLES` | `ON`, `OFF` | `ON` (standalone) | Build example programs |
+| `LLAMA_BUILD_SERVER` | `ON`, `OFF` | `ON` (standalone) | Build HTTP server |
+| `LLAMA_BUILD_COMMON` | `ON`, `OFF` | `ON` (standalone) | Build common utilities |
+
+```bash Minimal build (library only)
+cmake -B build \
+    -DLLAMA_BUILD_TESTS=OFF \
+    -DLLAMA_BUILD_TOOLS=OFF \
+    -DLLAMA_BUILD_EXAMPLES=OFF \
+    -DLLAMA_BUILD_SERVER=OFF
+cmake --build build --config Release
+```
+
+## GPU Backend Options
+
+### CUDA (NVIDIA)
+
+| Option | Values | Default | Description |
+|--------|--------|---------|-------------|
+| `GGML_CUDA` | `ON`, `OFF` | `OFF` | Enable CUDA support |
+| `GGML_CUDA_FORCE_MMQ` | `ON`, `OFF` | `OFF` | Force MMQ kernels instead of cuBLAS |
+| `GGML_CUDA_FORCE_CUBLAS` | `ON`, `OFF` | `OFF` | Force cuBLAS instead of custom kernels |
+| `GGML_CUDA_GRAPHS` | `ON`, `OFF` | `ON` | Enable CUDA graphs |
+| `GGML_CUDA_FA` | `ON`, `OFF` | `ON` | Compile FlashAttention kernels |
+| `GGML_CUDA_FA_ALL_QUANTS` | `ON`, `OFF` | `OFF` | Compile all quants for FlashAttention |
+| `GGML_CUDA_PEER_MAX_BATCH_SIZE` | Integer | `128` | Max batch size for peer access |
+| `GGML_CUDA_NO_PEER_COPY` | `ON`, `OFF` | `OFF` | Disable peer-to-peer copies |
+| `GGML_CUDA_NO_VMM` | `ON`, `OFF` | `OFF` | Disable CUDA Virtual Memory Management |
+| `CMAKE_CUDA_ARCHITECTURES` | String | Auto | Specify compute capabilities (e.g., "86;89") |
+
+<CodeGroup>
+
+```bash Basic CUDA
+cmake -B build -DGGML_CUDA=ON
+cmake --build build --config Release
+```
+
+```bash CUDA with specific architectures
+cmake -B build -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES="86;89"
+cmake --build build --config Release
+```
+
+```bash CUDA portable (all GPUs)
+cmake -B build -DGGML_CUDA=ON -DGGML_NATIVE=OFF
+cmake --build build --config Release
+```
+
+```bash CUDA with FlashAttention all quants
+cmake -B build -DGGML_CUDA=ON -DGGML_CUDA_FA_ALL_QUANTS=ON
+cmake --build build --config Release
+```
+
+</CodeGroup>
+
+<Warning>
+  `GGML_CUDA_FA_ALL_QUANTS=ON` significantly increases compilation time and binary size.
+</Warning>
+
+### HIP (AMD)
+
+| Option | Values | Default | Description |
+|--------|--------|---------|-------------|
+| `GGML_HIP` | `ON`, `OFF` | `OFF` | Enable HIP support |
+| `GGML_HIP_GRAPHS` | `ON`, `OFF` | `OFF` | Enable HIP graphs (experimental) |
+| `GGML_HIP_NO_VMM` | `ON`, `OFF` | `ON` | Disable HIP Virtual Memory Management |
+| `GGML_HIP_ROCWMMA_FATTN` | `ON`, `OFF` | `OFF` | Enable rocWMMA for FlashAttention |
+| `GGML_HIP_MMQ_MFMA` | `ON`, `OFF` | `ON` | Enable MFMA MMA for CDNA in MMQ |
+| `GPU_TARGETS` | String | All | Specify GPU architecture (e.g., "gfx1030") |
+
+```bash Linux HIP build
+HIPCXX="$(hipconfig -l)/clang" HIP_PATH="$(hipconfig -R)" \
+    cmake -B build -DGGML_HIP=ON -DGPU_TARGETS=gfx1030
+cmake --build build --config Release
+```
+
+```bash Windows HIP build
+set PATH=%HIP_PATH%\bin;%PATH%
+cmake -B build -G Ninja -DGGML_HIP=ON -DGPU_TARGETS=gfx1100 \
+    -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+cmake --build build
+```
+
+### Metal (Apple)
+
+| Option | Values | Default | Description |
+|--------|--------|---------|-------------|
+| `GGML_METAL` | `ON`, `OFF` | `ON` (macOS) | Enable Metal GPU support |
+| `GGML_METAL_NDEBUG` | `ON`, `OFF` | `OFF` | Disable Metal debugging |
+| `GGML_METAL_SHADER_DEBUG` | `ON`, `OFF` | `OFF` | Compile Metal with -fno-fast-math |
+| `GGML_METAL_EMBED_LIBRARY` | `ON`, `OFF` | `ON` | Embed Metal library in binary |
+| `GGML_METAL_MACOSX_VERSION_MIN` | String | Empty | Metal minimum macOS version |
+
+```bash Disable Metal
+cmake -B build -DGGML_METAL=OFF
+cmake --build build --config Release
+```
+
+### Vulkan
+
+| Option | Values | Default | Description |
+|--------|--------|---------|-------------|
+| `GGML_VULKAN` | `ON`, `OFF` | `OFF` | Enable Vulkan support |
+| `GGML_VULKAN_CHECK_RESULTS` | `ON`, `OFF` | `OFF` | Run Vulkan operation checks |
+| `GGML_VULKAN_DEBUG` | `ON`, `OFF` | `OFF` | Enable Vulkan debug output |
+| `GGML_VULKAN_MEMORY_DEBUG` | `ON`, `OFF` | `OFF` | Enable Vulkan memory debug |
+| `GGML_VULKAN_VALIDATE` | `ON`, `OFF` | `OFF` | Enable Vulkan validation layers |
+
+```bash Vulkan with validation
+cmake -B build -DGGML_VULKAN=ON -DGGML_VULKAN_VALIDATE=ON
+cmake --build build --config Release
+```
+
+### SYCL (Intel GPU)
+
+| Option | Values | Default | Description |
+|--------|--------|---------|-------------|
+| `GGML_SYCL` | `ON`, `OFF` | `OFF` | Enable SYCL support |
+| `GGML_SYCL_F16` | `ON`, `OFF` | `OFF` | Use 16-bit floats for calculations |
+| `GGML_SYCL_GRAPH` | `ON`, `OFF` | `ON` | Enable graphs in SYCL backend |
+| `GGML_SYCL_DNN` | `ON`, `OFF` | `ON` | Enable oneDNN in SYCL backend |
+| `GGML_SYCL_TARGET` | String | `INTEL` | SYCL target device |
+
+```bash
+cmake -B build -DGGML_SYCL=ON -DGGML_SYCL_F16=ON
+cmake --build build --config Release
+```
+
+## CPU Backend Options
+
+### BLAS Libraries
+
+| Option | Values | Default | Description |
+|--------|--------|---------|-------------|
+| `GGML_BLAS` | `ON`, `OFF` | `OFF` | Enable BLAS support |
+| `GGML_BLAS_VENDOR` | String | `Generic` | BLAS vendor (OpenBLAS, Intel10_64lp, Apple, etc.) |
+| `GGML_ACCELERATE` | `ON`, `OFF` | `ON` (macOS) | Use Accelerate framework |
+
+<CodeGroup>
+
+```bash OpenBLAS
+cmake -B build -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=OpenBLAS
+cmake --build build --config Release
+```
+
+```bash Intel MKL
+source /opt/intel/oneapi/setvars.sh
+cmake -B build -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=Intel10_64lp \
+    -DCMAKE_C_COMPILER=icx -DCMAKE_CXX_COMPILER=icpx
+cmake --build build --config Release
+```
+
+```bash Apple Accelerate (default on macOS)
+cmake -B build
+cmake --build build --config Release
+```
+
+</CodeGroup>
+
+### CPU Instruction Sets
+
+| Option | Values | Default | Description |
+|--------|--------|---------|-------------|
+| `GGML_SSE42` | `ON`, `OFF` | `ON`* | Enable SSE 4.2 |
+| `GGML_AVX` | `ON`, `OFF` | `ON`* | Enable AVX |
+| `GGML_AVX2` | `ON`, `OFF` | `ON`* | Enable AVX2 |
+| `GGML_AVX_VNNI` | `ON`, `OFF` | `OFF` | Enable AVX-VNNI |
+| `GGML_AVX512` | `ON`, `OFF` | `OFF` | Enable AVX-512F |
+| `GGML_AVX512_VBMI` | `ON`, `OFF` | `OFF` | Enable AVX-512 VBMI |
+| `GGML_AVX512_VNNI` | `ON`, `OFF` | `OFF` | Enable AVX-512 VNNI |
+| `GGML_AVX512_BF16` | `ON`, `OFF` | `OFF` | Enable AVX-512 BF16 |
+| `GGML_FMA` | `ON`, `OFF` | `ON`* | Enable FMA (non-MSVC) |
+| `GGML_F16C` | `ON`, `OFF` | `ON`* | Enable F16C (non-MSVC) |
+| `GGML_BMI2` | `ON`, `OFF` | `ON`* | Enable BMI2 |
+
+\* Default is `ON` unless `GGML_NATIVE=OFF`
+
+<Warning>
+  These options override automatic detection. Only use if you know your target CPU capabilities.
+</Warning>
+
+```bash Enable AVX-512
+cmake -B build -DGGML_AVX512=ON -DGGML_AVX512_VNNI=ON
+cmake --build build --config Release
+```
+
+### ARM CPU Options
+
+| Option | Values | Default | Description |
+|--------|--------|---------|-------------|
+| `GGML_CPU_KLEIDIAI` | `ON`, `OFF` | `OFF` | Use KleidiAI optimized kernels |
+| `GGML_CPU_ARM_ARCH` | String | Empty | CPU architecture for ARM |
+| `GGML_RVV` | `ON`, `OFF` | `ON` | Enable RISC-V vector extension |
+
+```bash Arm KleidiAI
+cmake -B build -DGGML_CPU_KLEIDIAI=ON
+cmake --build build --config Release
+```
+
+## Special Purpose Backends
+
+### CANN (Ascend NPU)
+
+```bash
+cmake -B build -DGGML_CANN=ON
+cmake --build build --config Release
+```
+
+### ZenDNN (AMD EPYC)
+
+| Option | Values | Default | Description |
+|--------|--------|---------|-------------|
+| `GGML_ZENDNN` | `ON`, `OFF` | `OFF` | Enable ZenDNN support |
+| `ZENDNN_ROOT` | Path | Empty | Path to ZenDNN installation |
+
+```bash
+cmake -B build -DGGML_ZENDNN=ON
+cmake --build build --config Release
+```
+
+### OpenCL (Qualcomm Adreno)
+
+| Option | Values | Default | Description |
+|--------|--------|---------|-------------|
+| `GGML_OPENCL` | `ON`, `OFF` | `OFF` | Enable OpenCL support |
+| `GGML_OPENCL_PROFILING` | `ON`, `OFF` | `OFF` | Enable OpenCL profiling |
+| `GGML_OPENCL_EMBED_KERNELS` | `ON`, `OFF` | `ON` | Embed kernels in binary |
+| `GGML_OPENCL_USE_ADRENO_KERNELS` | `ON`, `OFF` | `ON` | Use optimized Adreno kernels |
+
+```bash
+cmake -B build -DGGML_OPENCL=ON
+cmake --build build --config Release
+```
+
+### RPC Backend
+
+```bash
+cmake -B build -DGGML_RPC=ON
+cmake --build build --config Release
+```
+
+## Advanced Options
+
+### Threading
+
+| Option | Values | Default | Description |
+|--------|--------|---------|-------------|
+| `GGML_OPENMP` | `ON`, `OFF` | `ON` | Enable OpenMP for threading |
+
+```bash Disable OpenMP
+cmake -B build -DGGML_OPENMP=OFF
+cmake --build build --config Release
+```
+
+### Debugging & Diagnostics
+
+| Option | Values | Default | Description |
+|--------|--------|---------|-------------|
+| `LLAMA_ALL_WARNINGS` | `ON`, `OFF` | `ON` | Enable all compiler warnings |
+| `LLAMA_FATAL_WARNINGS` | `ON`, `OFF` | `OFF` | Treat warnings as errors |
+| `LLAMA_SANITIZE_THREAD` | `ON`, `OFF` | `OFF` | Enable thread sanitizer |
+| `LLAMA_SANITIZE_ADDRESS` | `ON`, `OFF` | `OFF` | Enable address sanitizer |
+| `LLAMA_SANITIZE_UNDEFINED` | `ON`, `OFF` | `OFF` | Enable undefined behavior sanitizer |
+
+```bash Build with sanitizers
+cmake -B build -DCMAKE_BUILD_TYPE=Debug \
+    -DLLAMA_SANITIZE_ADDRESS=ON \
+    -DLLAMA_SANITIZE_UNDEFINED=ON
+cmake --build build
+```
+
+### Backend Dynamic Loading
+
+| Option | Values | Default | Description |
+|--------|--------|---------|-------------|
+| `GGML_BACKEND_DL` | `ON`, `OFF` | `OFF` | Build backends as dynamic libraries |
+| `GGML_BACKEND_DIR` | Path | Empty | Directory to load backends from |
+
+<Note>
+  `GGML_BACKEND_DL` requires `BUILD_SHARED_LIBS=ON`.
+</Note>
+
+```bash Dynamic backend loading
+cmake -B build -DBUILD_SHARED_LIBS=ON -DGGML_BACKEND_DL=ON
+cmake --build build --config Release
+```
+
+### HTTPS/SSL Support
+
+| Option | Values | Default | Description |
+|--------|--------|---------|-------------|
+| `LLAMA_OPENSSL` | `ON`, `OFF` | `ON` | Use OpenSSL for HTTPS support |
+
+```bash Disable OpenSSL
+cmake -B build -DLLAMA_OPENSSL=OFF
+cmake --build build --config Release
+```
+
+## Common Build Configurations
+
+### Development Build
+
+Fast compilation, full debug info:
+
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Debug \
+    -DLLAMA_ALL_WARNINGS=ON
+cmake --build build
+```
+
+### Production Build
+
+Optimized for performance:
+
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Release \
+    -DGGML_NATIVE=ON \
+    -DGGML_LTO=ON \
+    -DBUILD_SHARED_LIBS=OFF
+cmake --build build --config Release
+```
+
+### Multi-GPU Build
+
+CUDA + Vulkan for flexibility:
+
+```bash
+cmake -B build -DGGML_CUDA=ON -DGGML_VULKAN=ON \
+    -DGGML_CUDA_GRAPHS=ON
+cmake --build build --config Release
+```
+
+### Minimal Binary Size
+
+Library only, static linking:
+
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=MinSizeRel \
+    -DBUILD_SHARED_LIBS=OFF \
+    -DLLAMA_BUILD_TESTS=OFF \
+    -DLLAMA_BUILD_TOOLS=OFF \
+    -DLLAMA_BUILD_EXAMPLES=OFF \
+    -DLLAMA_BUILD_SERVER=OFF
+cmake --build build --config MinSizeRel
+```
+
+### Portable Build
+
+Runs on any x86_64 system:
+
+```bash
+cmake -B build -DGGML_NATIVE=OFF \
+    -DGGML_AVX=ON \
+    -DGGML_AVX2=ON \
+    -DGGML_FMA=ON \
+    -DBUILD_SHARED_LIBS=OFF
+cmake --build build --config Release
+```
+
+## Option Discovery
+
+To see all available CMake options:
+
+```bash
+cmake -B build -LH
+```
+
+To see current configuration:
+
+```bash
+cmake -B build -LA
+```
+
+For GUI-based configuration (requires cmake-gui):
+
+```bash
+cmake-gui -B build
+```

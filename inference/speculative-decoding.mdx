@@ -1,0 +1,499 @@
+---
+title: Speculative Decoding
+description: Accelerate token generation with draft models and pattern matching in llama.cpp
+---
+
+Speculative decoding significantly accelerates token generation by predicting multiple tokens ahead of the main model. This technique leverages the efficiency of batch processing versus sequential generation.
+
+## Overview
+
+[Speculative decoding](https://en.wikipedia.org/wiki/Transformer_(deep_learning)#Speculative_decoding) works by generating draft tokens quickly and then verifying them with the target model in a single batch. When draft predictions are frequently correct, this approach provides substantial speedups.
+
+### How It Works
+
+<Steps>
+  <Step title="Draft Generation">
+    A smaller, faster draft model (or pattern matcher) generates multiple candidate tokens
+  </Step>
+  
+  <Step title="Batch Verification">
+    The main model verifies all draft tokens in a single forward pass (like prompt processing)
+  </Step>
+  
+  <Step title="Accept or Reject">
+    Correct tokens are accepted; generation continues from the first incorrect token
+  </Step>
+</Steps>
+
+**Key benefit**: Computing n tokens in a batch is much faster than computing them sequentially.
+
+## Quick Start
+
+### With Draft Model
+
+```bash
+# Start server with main model and draft model
+./llama-server \
+  -m main-model.gguf \
+  -md draft-model.gguf \
+  --draft 16
+```
+
+### Without Draft Model (Pattern Matching)
+
+```bash
+# Use n-gram pattern matching for speculation
+./llama-server -m model.gguf --spec-type ngram-simple --draft-max 64
+```
+
+## Implementations
+
+llama-server supports several speculative decoding implementations that can be mixed.
+
+### Draft Model
+
+A smaller model generates draft tokens. This is the most common approach.
+
+```bash
+# With local draft model
+./llama-server \
+  -m llama-3.1-70b.gguf \
+  -md llama-3.2-1b.gguf \
+  --draft 16 \
+  --draft-min 5 \
+  --draft-p-min 0.75
+
+# With Hugging Face models
+./llama-server \
+  -hf meta-llama/Llama-3.1-70B-Instruct-GGUF \
+  -hfd meta-llama/Llama-3.2-1B-Instruct-GGUF \
+  --draft 16
+```
+
+<ParamField path="-md, --model-draft" type="string">
+  Path to draft model file (GGUF format)
+</ParamField>
+
+<ParamField path="--draft, --draft-max" type="integer" default="16">
+  Number of tokens to draft per iteration
+</ParamField>
+
+<ParamField path="--draft-min" type="integer" default="0">
+  Minimum number of draft tokens to use
+</ParamField>
+
+<ParamField path="--draft-p-min" type="float" default="0.75">
+  Minimum probability for accepting draft tokens (greedy threshold)
+</ParamField>
+
+### N-gram Simple
+
+Searches token history for the last matching n-gram and uses the following m tokens as draft.
+
+**Best for**: Code refactoring, iterating over similar text
+
+```bash
+./llama-server -m model.gguf --spec-type ngram-simple --draft-max 64
+```
+
+**Characteristics**:
+- Minimal overhead
+- No additional model needed
+- Relies on patterns already in context
+- Works well when text has repetitive structure
+
+### N-gram Map (Key)
+
+Looks for the current n-gram in token history and creates drafts from frequently repeated sequences.
+
+**Best for**: Repetitive tasks, structured output
+
+```bash
+./llama-server -m model.gguf \
+  --spec-type ngram-map-k \
+  --spec-ngram-size-n 12 \
+  --spec-ngram-size-m 48 \
+  --spec-ngram-min-hits 1 \
+  --draft-max 64
+```
+
+<ParamField path="--spec-ngram-size-n" type="integer" default="12">
+  Length of lookup n-gram (how many tokens to look back)
+</ParamField>
+
+<ParamField path="--spec-ngram-size-m" type="integer" default="48">
+  Length of draft m-gram (how many tokens to draft)
+</ParamField>
+
+<ParamField path="--spec-ngram-min-hits" type="integer" default="1">
+  Minimum occurrences before using as draft
+</ParamField>
+
+**Characteristics**:
+- Uses internal hash-map of n-grams
+- Tracks acceptance statistics
+- Configurable minimum occurrences threshold
+
+### N-gram Map Key-4-Values (Experimental)
+
+Tracks up to 4 possible continuations for each n-gram key and selects the most frequent.
+
+**Best for**: Scenarios with multiple common continuations
+
+```bash
+./llama-server -m model.gguf \
+  --spec-type ngram-map-k4v \
+  --spec-ngram-size-n 8 \
+  --spec-ngram-size-m 8 \
+  --spec-ngram-min-hits 2 \
+  --draft-max 64
+```
+
+**Characteristics**:
+- Experimental implementation
+- Tracks multiple possible continuations
+- Useful for longer repetitions
+
+### N-gram Mod
+
+Uses a hash pool with LCG (Linear Congruential Generator) for n-gram storage.
+
+**Best for**: Long-running servers, reasoning models, summarization
+
+```bash
+./llama-server -m model.gguf \
+  --spec-type ngram-mod \
+  --spec-ngram-size-n 24 \
+  --draft-min 48 \
+  --draft-max 64
+```
+
+**Characteristics**:
+- Lightweight (~16 MB memory)
+- Constant memory and complexity
+- Variable draft lengths
+- Shared hash pool across all server slots (different requests benefit each other)
+
+**Applications**:
+- Iterating over blocks of text/code
+- Reasoning models (repeating thinking in final answer)
+- Summarization tasks
+
+### N-gram Cache
+
+Maintains statistics about short n-gram sequences. Can load external statistics from files.
+
+```bash
+./llama-server -m model.gguf --spec-type ngram-cache
+```
+
+**Characteristics**:
+- Computes draft using probability statistics
+- Can improve with external data
+- Memory overhead for statistics
+
+## Configuration
+
+### Draft Model Settings
+
+```bash
+# Full configuration
+./llama-server \
+  -m main-model.gguf \
+  -md draft-model.gguf \
+  --draft 16 \              # max draft tokens
+  --draft-min 5 \           # min draft tokens
+  --draft-p-min 0.75 \      # acceptance threshold
+  -cd 2048 \                # draft model context size
+  -ngld 99 \                # draft model GPU layers
+  -devd cuda:0              # draft model device
+```
+
+### Threading
+
+```bash
+# Different threads for draft model
+./llama-server \
+  -m main.gguf -md draft.gguf \
+  -t 8 \         # main model threads
+  -td 4 \        # draft model threads
+  -tb 16 \       # main batch threads
+  -tbd 8         # draft batch threads
+```
+
+### KV Cache for Draft
+
+```bash
+# Quantize draft model KV cache
+./llama-server \
+  -m main.gguf -md draft.gguf \
+  -ctkd q8_0 \   # draft K cache type
+  -ctvd q8_0     # draft V cache type
+```
+
+## Choosing an Implementation
+
+### Decision Matrix
+
+| Use Case | Recommended Implementation | Reason |
+|----------|---------------------------|--------|
+| General speedup | Draft model | Best overall performance |
+| Code refactoring | ngram-simple | Repeated patterns |
+| Structured output | ngram-map-k | Frequent sequences |
+| Long sessions | ngram-mod | Shared learning across requests |
+| Reasoning models | ngram-mod | Captures thinking patterns |
+| Limited memory | ngram-simple | Minimal overhead |
+| Maximum speed | Draft model + ngram-mod | Hybrid approach |
+
+### Combining Implementations
+
+You can mix a draft model with draftless decoding (draftless takes precedence):
+
+```bash
+# Use both draft model and ngram-mod
+./llama-server \
+  -m main.gguf \
+  -md draft.gguf \
+  --draft 16 \
+  --spec-type ngram-mod \
+  --spec-ngram-size-n 24 \
+  --draft-max 64
+```
+
+## Examples
+
+### Code Generation with Draft Model
+
+```bash
+./llama-server \
+  -hf deepseek-ai/DeepSeek-Coder-V2-Instruct-GGUF \
+  -hfd Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF \
+  --draft 32 \
+  -c 8192
+```
+
+### Code Refactoring with Pattern Matching
+
+```bash
+./llama-server -m codellama.gguf \
+  --spec-type ngram-simple \
+  --draft-max 64 \
+  -c 8192
+```
+
+### Reasoning Model
+
+```bash
+./llama-server -m deepseek-r1.gguf \
+  --spec-type ngram-mod \
+  --spec-ngram-size-n 24 \
+  --draft-min 48 \
+  --draft-max 64
+```
+
+### High-Speed Server
+
+```bash
+./llama-server \
+  -m llama-70b.gguf \
+  -md llama-1b.gguf \
+  --draft 16 \
+  --spec-type ngram-mod \
+  --spec-ngram-size-n 24 \
+  -ngl 99 \
+  -ngld 99 \
+  -np 4
+```
+
+## Performance Monitoring
+
+Speculative decoding prints statistics to help tune performance:
+
+### Example Output
+
+```
+draft acceptance rate = 0.57576 (  171 accepted /   297 generated)
+statistics ngram_simple: #calls = 15, #gen drafts = 5, #acc drafts = 5, #gen tokens = 187, #acc tokens = 73
+statistics draft: #calls = 10, #gen drafts = 10, #acc drafts = 10, #gen tokens = 110, #acc tokens = 98
+```
+
+```
+draft acceptance rate = 0.70312 (   90 accepted /   128 generated)
+statistics ngram_mod: #calls = 810, #gen drafts = 15, #acc drafts = 15, #gen tokens = 960, #acc tokens = 730, dur(b,g,a) = 0.149, 0.347, 0.005 ms
+```
+
+### Metrics Explained
+
+- **acceptance rate**: Proportion of draft tokens accepted by main model (higher is better)
+- **#calls(b,g,a)**: Number of calls for begin/generation/accumulation
+- **#gen drafts**: Number of draft sequences generated
+- **#acc drafts**: Number of drafts partially/fully accepted
+- **#gen tokens**: Total tokens generated (including rejected)
+- **#acc tokens**: Tokens accepted by main model
+- **dur(b,g,a)**: Durations in milliseconds for begin/generation/accumulation
+
+### Tuning Tips
+
+**High acceptance rate (&gt;60%)**: Good configuration, consider increasing `--draft-max` for more speedup
+
+**Low acceptance rate (&lt;40%)**: Try:
+- Decrease `--draft-max`
+- Increase `--draft-p-min` (more conservative)
+- Choose different draft model
+- Switch to pattern-based method
+
+**For ngram methods**: 
+- Increase `--spec-ngram-size-n` for longer patterns
+- Adjust `--spec-ngram-min-hits` based on repetition
+
+## Selecting a Draft Model
+
+### Requirements
+
+Good draft models are:
+- **Much smaller** than the main model (5-20x smaller)
+- **Same tokenizer** as the main model
+- **Same or similar architecture family**
+
+### Recommended Pairs
+
+| Main Model | Draft Model | Speedup |
+|------------|-------------|----------|
+| Llama 3.1 70B | Llama 3.2 1B | ~2-3x |
+| Llama 3.1 70B | Llama 3.2 3B | ~2-2.5x |
+| Qwen2.5 72B | Qwen2.5 7B | ~2-2.5x |
+| DeepSeek Coder 33B | Qwen2.5 Coder 1.5B | ~2-3x |
+| Mixtral 8x7B | Mistral 7B | ~1.5-2x |
+
+### Using Pre-configured Pairs
+
+Some llama-server flags load pre-configured model pairs:
+
+```bash
+# Qwen 2.5 Coder with draft model
+./llama-server --fim-qwen-7b-spec
+./llama-server --fim-qwen-14b-spec
+```
+
+## Advanced Configuration
+
+### Token Replacement
+
+For incompatible tokenizers between main and draft models:
+
+```bash
+./llama-server \
+  -m main.gguf \
+  -md draft.gguf \
+  --spec-replace "TARGET_STRING DRAFT_STRING"
+```
+
+### MoE Models
+
+For Mixture-of-Experts draft models:
+
+```bash
+./llama-server \
+  -m main.gguf \
+  -md moe-draft.gguf \
+  -cmoed \    # keep MoE weights in CPU
+  -ncmoed 2   # or keep first N layers in CPU
+```
+
+## Benchmarking
+
+To measure speculative decoding effectiveness:
+
+<Steps>
+  <Step title="Run without speculation">
+    ```bash
+    ./llama-cli -m model.gguf -p "Prompt" -n 200 --show-timings
+    # Note: tokens/second
+    ```
+  </Step>
+  
+  <Step title="Run with speculation">
+    ```bash
+    ./llama-cli -m model.gguf -md draft.gguf --draft 16 -p "Prompt" -n 200 --show-timings
+    # Note: tokens/second, acceptance rate
+    ```
+  </Step>
+  
+  <Step title="Calculate speedup">
+    ```
+    Speedup = (tokens/sec with spec) / (tokens/sec without spec)
+    ```
+  </Step>
+</Steps>
+
+## Troubleshooting
+
+### Low Acceptance Rate
+
+**Issue**: Draft tokens frequently rejected
+
+**Solutions**:
+- Verify draft model uses same tokenizer
+- Try a different draft model
+- Reduce `--draft-max`
+- Increase `--draft-p-min`
+- Check if task suits speculative decoding
+
+### No Speedup or Slowdown
+
+**Issue**: Performance worse with speculation
+
+**Solutions**:
+- Draft model too large (should be 5-20x smaller)
+- Ensure both models on GPU: `-ngl 99 -ngld 99`
+- Reduce `--draft-max`
+- Try pattern-based method instead
+- Task may not have predictable patterns
+
+### Memory Issues
+
+**Issue**: Out of memory with draft model
+
+**Solutions**:
+- Use smaller draft model
+- Quantize draft model KV cache: `-ctkd q8_0 -ctvd q8_0`
+- Keep draft model on CPU, main on GPU
+- Reduce draft context size: `-cd 1024`
+- Use pattern-based method (no draft model)
+
+### Pattern Methods Not Working
+
+**Issue**: ngram methods show no speedup
+
+**Solutions**:
+- Increase context size (patterns need history)
+- Adjust `--spec-ngram-size-n` and `--spec-ngram-size-m`
+- Try different ngram implementation
+- Task may lack repetitive patterns
+- Use draft model instead
+
+## Performance Tips
+
+1. **Start conservative**: Begin with `--draft 8` and increase based on acceptance rate
+2. **Monitor acceptance**: Aim for >50% acceptance rate for worthwhile speedup
+3. **GPU both models**: Put both main and draft on GPU for best performance
+4. **Match context**: Draft model context should be sufficient for current task
+5. **Profile different methods**: Test multiple implementations for your use case
+6. **Combine methods**: Mix draft model with pattern matching for hybrid approach
+
+## See Also
+
+<CardGroup cols={2}>
+  <Card title="Server" icon="server" href="/inference/server">
+    Server configuration and API
+  </Card>
+  <Card title="CLI Tool" icon="terminal" href="/inference/cli">
+    Command-line usage
+  </Card>
+  <Card title="Model Quantization" icon="compress" href="/quantization">
+    Optimize draft models
+  </Card>
+  <Card title="Performance Guide" icon="gauge-high" href="/performance">
+    General optimization tips
+  </Card>
+</CardGroup>

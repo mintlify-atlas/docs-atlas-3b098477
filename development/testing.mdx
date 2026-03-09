@@ -1,0 +1,545 @@
+---
+title: Testing llama.cpp
+description: Comprehensive guide to testing procedures, running tests, and debugging test failures
+---
+
+## Overview
+
+llama.cpp includes an extensive test suite covering unit tests, integration tests, and backend-specific tests. This guide covers how to build, run, and debug tests effectively.
+
+<Note>
+Before submitting a pull request, you should execute the full CI locally to ensure your changes don't break existing functionality.
+</Note>
+
+## Quick Start
+
+### Build and Run All Tests
+
+```bash
+# Build the project with tests enabled
+cmake -B build -DLLAMA_BUILD_TESTS=ON
+cmake --build build
+
+# Run all tests
+cd build
+ctest
+
+# Run tests with verbose output
+ctest -V
+
+# Run tests in parallel
+ctest -j $(nproc)
+```
+
+### Run Specific Tests
+
+```bash
+# Run tests matching a pattern
+ctest -R tokenizer
+
+# Run a specific test by name
+ctest -R test-tokenizer-0-llama-spm -V
+
+# Run tests with a specific label
+ctest -L main
+```
+
+## Test Categories
+
+llama.cpp has several categories of tests:
+
+<AccordionGroup>
+  <Accordion title="Unit Tests" icon="flask">
+    **C++ Unit Tests** - Test individual components and functions
+    
+    Examples:
+    - `test-tokenizer-0` - Tokenizer validation
+    - `test-sampling` - Sampling algorithms
+    - `test-grammar-parser` - Grammar parsing
+    - `test-arg-parser` - Command-line argument parsing
+    - `test-rope` - Rotary position embeddings
+    - `test-quantize-fns` - Quantization functions
+    
+    Location: `tests/test-*.cpp`
+  </Accordion>
+  
+  <Accordion title="Backend Operations Tests" icon="microchip">
+    **Backend Ops Tests** - Verify consistency across different backends (CPU, CUDA, Metal, etc.)
+    
+    The `test-backend-ops` tool checks that different backend implementations of ggml operators produce consistent results.
+    
+    ```bash
+    # Build backend ops test
+    cmake --build build --target test-backend-ops
+    
+    # Run with default backends
+    ./build/bin/test-backend-ops
+    
+    # Run with specific backends
+    GGML_CUDA=1 ./build/bin/test-backend-ops
+    ```
+    
+    <Warning>
+    This test requires access to at least two different ggml backends to verify consistency.
+    </Warning>
+  </Accordion>
+  
+  <Accordion title="Server Tests" icon="server">
+    **Python-based Server Tests** - Test the HTTP API server using pytest
+    
+    Location: `tools/server/tests/`
+    
+    See [Server Testing](#server-testing) section for details.
+  </Accordion>
+  
+  <Accordion title="Integration Tests" icon="network-wired">
+    **End-to-End Tests** - Test complete workflows with real models
+    
+    Examples:
+    - `test-chat` - Chat template functionality
+    - `test-chat-template` - Chat template parsing
+    - `test-llama-archs` - Model architecture loading
+    - `test-thread-safety` - Multi-threaded inference
+  </Accordion>
+</AccordionGroup>
+
+## Running the Full CI Locally
+
+Before submitting a PR, execute the full CI locally:
+
+```bash
+mkdir tmp
+
+# CPU-only build
+bash ./ci/run.sh ./tmp/results ./tmp/mnt
+
+# With CUDA support
+GG_BUILD_CUDA=1 bash ./ci/run.sh ./tmp/results ./tmp/mnt
+
+# With SYCL support
+source /opt/intel/oneapi/setvars.sh
+GG_BUILD_SYCL=1 bash ./ci/run.sh ./tmp/results ./tmp/mnt
+
+# With MUSA support
+GG_BUILD_MUSA=1 bash ./ci/run.sh ./tmp/results ./tmp/mnt
+```
+
+<Note>
+The CI runs comprehensive tests on different hardware configurations. Running it locally helps catch issues before submitting your PR.
+</Note>
+
+## Testing Modified Code
+
+### Testing ggml Modifications
+
+If you modified the `ggml` source, you **must** run `test-backend-ops`:
+
+<Steps>
+  <Step title="Build with multiple backends">
+    ```bash
+    # Build with CUDA support
+    cmake -B build -DLLAMA_CUDA=ON
+    cmake --build build --target test-backend-ops
+    ```
+  </Step>
+  
+  <Step title="Run backend operations test">
+    ```bash
+    ./build/bin/test-backend-ops
+    ```
+    
+    This verifies that different backends produce consistent results for ggml operations.
+  </Step>
+  
+  <Step title="Add test cases for new operators">
+    If you added a new ggml operator, add corresponding test cases to `tests/test-backend-ops.cpp`:
+    
+    ```cpp
+    // Example test case structure
+    struct test_my_op : public test_case {
+        // Define test parameters and implementation
+    };
+    ```
+  </Step>
+</Steps>
+
+### Testing Performance Impact
+
+Verify your changes don't negatively impact performance:
+
+```bash
+# Benchmark inference speed
+llama-bench -m model.gguf -p 512 -n 128 -t 4
+
+# Compare before and after changes
+llama-bench -m model.gguf -r 5  # Run 5 repetitions for average
+```
+
+### Testing Perplexity
+
+Ensure your changes don't affect model quality:
+
+```bash
+# Download test dataset (if needed)
+wget https://huggingface.co/datasets/ggml-org/ci/resolve/main/wikitext-2-raw-v1.zip
+unzip wikitext-2-raw-v1.zip
+
+# Run perplexity test
+llama-perplexity -m model.gguf -f wikitext-2-raw/wiki.test.raw
+```
+
+## Debugging Tests
+
+### Using the debug-test.sh Script
+
+The `scripts/debug-test.sh` script provides an easy way to debug specific tests:
+
+```bash
+# Show available tests matching pattern
+./scripts/debug-test.sh test-tokenizer
+
+# Run a specific test (interactive selection)
+./scripts/debug-test.sh test-tokenizer
+
+# Run with GDB debugger
+./scripts/debug-test.sh -g test-tokenizer
+
+# Run specific test number (if you know it)
+./scripts/debug-test.sh test 23
+
+# Show help
+./scripts/debug-test.sh -h
+```
+
+### Manual Debugging Process
+
+For more control, follow these steps:
+
+<Steps>
+  <Step title="Create debug build directory">
+    ```bash
+    rm -rf build-ci-debug
+    mkdir build-ci-debug
+    cd build-ci-debug
+    ```
+  </Step>
+  
+  <Step title="Configure with debug symbols">
+    ```bash
+    cmake -DCMAKE_BUILD_TYPE=Debug \
+          -DLLAMA_CUDA=1 \
+          -DLLAMA_FATAL_WARNINGS=ON \
+          ..
+    ```
+  </Step>
+  
+  <Step title="Build test binaries">
+    ```bash
+    make -j
+    ```
+  </Step>
+  
+  <Step title="Find test commands">
+    ```bash
+    # List all tests matching pattern
+    ctest -R "test-tokenizer" -V -N
+    ```
+    
+    This outputs test commands like:
+    ```
+    Test command: /path/to/build/bin/test-tokenizer-0 "/path/to/models/ggml-vocab-llama-spm.gguf"
+    ```
+  </Step>
+  
+  <Step title="Run with GDB">
+    ```bash
+    gdb --args ./bin/test-tokenizer-0 "../models/ggml-vocab-llama-spm.gguf"
+    ```
+    
+    In GDB:
+    ```gdb
+    # Set breakpoint
+    (gdb) b main
+    (gdb) b llama_tokenize
+    
+    # Run
+    (gdb) run
+    
+    # Step through
+    (gdb) next
+    (gdb) step
+    
+    # Inspect variables
+    (gdb) print token_count
+    (gdb) print *ctx
+    ```
+  </Step>
+</Steps>
+
+### Debugging with Valgrind
+
+```bash
+# Check for memory leaks
+valgrind --leak-check=full \
+         --show-leak-kinds=all \
+         --track-origins=yes \
+         ./build/bin/test-tokenizer-0 model.gguf
+
+# Check for threading issues
+valgrind --tool=helgrind \
+         ./build/bin/test-thread-safety -m model.gguf
+```
+
+## Server Testing
+
+The server has its own comprehensive test suite using Python and pytest.
+
+### Setup Server Tests
+
+<Steps>
+  <Step title="Install dependencies">
+    ```bash
+    cd tools/server/tests
+    pip install -r requirements.txt
+    ```
+  </Step>
+  
+  <Step title="Build the server">
+    ```bash
+    cd ../../../
+    cmake -B build
+    cmake --build build --target llama-server
+    ```
+  </Step>
+  
+  <Step title="Run tests">
+    ```bash
+    cd tools/server/tests
+    ./tests.sh
+    ```
+  </Step>
+</Steps>
+
+### Server Test Configuration
+
+Environment variables for customizing server tests:
+
+| Variable | Description | Default |
+|----------|-------------|----------|
+| `PORT` | Server listening port | `8080` |
+| `LLAMA_SERVER_BIN_PATH` | Path to server binary | `../../../build/bin/llama-server` |
+| `DEBUG` | Enable verbose output | |
+| `N_GPU_LAYERS` | Layers to offload to GPU | |
+| `LLAMA_CACHE` | Model cache directory | `tmp` |
+
+### Running Specific Server Tests
+
+```bash
+# Run slow tests (downloads many models)
+SLOW_TESTS=1 ./tests.sh
+
+# Run with debug output
+DEBUG=1 ./tests.sh -s -v -x
+
+# Run all tests in a file
+./tests.sh unit/test_chat_completion.py -v -x
+
+# Run a single test
+./tests.sh unit/test_chat_completion.py::test_invalid_chat_completion_req
+
+# Compile and test in single command
+cmake --build build -j --target llama-server && ./tools/server/tests/tests.sh
+```
+
+### Debugging Server Tests
+
+Debug the server while running tests:
+
+```bash
+# Terminal 1: Start server in debugger
+gdb --args ../../../build/bin/llama-server \
+    --host 127.0.0.1 --port 8080 \
+    --temp 0.8 --seed 42 \
+    --hf-repo ggml-org/models \
+    --hf-file tinyllamas/stories260K.gguf \
+    --batch-size 32 --ctx-size 512 \
+    --parallel 2 --n-predict 64
+
+# Set breakpoint
+(gdb) br server.cpp:4604
+(gdb) r
+
+# Terminal 2: Run test
+env DEBUG_EXTERNAL=1 ./tests.sh unit/test_chat_completion.py -v -x
+```
+
+<Note>
+The `DEBUG_EXTERNAL=1` environment variable tells the test suite to connect to an externally-started server instead of spawning its own.
+</Note>
+
+## Test Structure and CMake
+
+### Understanding Test Registration
+
+Tests are registered in `tests/CMakeLists.txt` using helper functions:
+
+```cmake
+# Build and test a source file
+llama_build_and_test(test-sampling.cpp)
+
+# Build once, test multiple times with different args
+llama_build(test-tokenizer-0.cpp)
+llama_test(test-tokenizer-0 
+    NAME test-tokenizer-0-llama-spm 
+    ARGS ${PROJECT_SOURCE_DIR}/models/ggml-vocab-llama-spm.gguf)
+llama_test(test-tokenizer-0 
+    NAME test-tokenizer-0-falcon 
+    ARGS ${PROJECT_SOURCE_DIR}/models/ggml-vocab-falcon.gguf)
+```
+
+### Adding a New Test
+
+<Steps>
+  <Step title="Create test source file">
+    ```cpp
+    // tests/test-my-feature.cpp
+    #include "testing.h"
+    
+    int main() {
+        // Your test logic
+        assert(my_feature() == expected_result);
+        return 0;
+    }
+    ```
+  </Step>
+  
+  <Step title="Register in CMakeLists.txt">
+    ```cmake
+    # tests/CMakeLists.txt
+    llama_build_and_test(test-my-feature.cpp)
+    ```
+  </Step>
+  
+  <Step title="Build and run">
+    ```bash
+    cmake --build build --target test-my-feature
+    ctest -R test-my-feature -V
+    ```
+  </Step>
+</Steps>
+
+## Common Test Patterns
+
+### Testing with Models
+
+Many tests require model files:
+
+```cpp
+#include "get-model.h"
+
+int main(int argc, char ** argv) {
+    if (argc < 2) {
+        fprintf(stderr, "Usage: %s <model-path>\n", argv[0]);
+        return 1;
+    }
+    
+    const char * model_path = argv[1];
+    
+    // Load model
+    llama_model_params model_params = llama_model_default_params();
+    llama_model * model = llama_load_model_from_file(model_path, model_params);
+    
+    // Run tests...
+    
+    llama_free_model(model);
+    return 0;
+}
+```
+
+### Assertion Helpers
+
+Use the testing helpers from `tests/testing.h`:
+
+```cpp
+#include "testing.h"
+
+// Basic assertions
+ASSERT(condition);
+ASSERT_EQ(actual, expected);
+ASSERT_NE(actual, unexpected);
+ASSERT_LT(actual, limit);
+ASSERT_LE(actual, limit);
+
+// Floating point comparison
+ASSERT_NEAR(actual, expected, epsilon);
+```
+
+## Continuous Integration
+
+llama.cpp uses GitHub Actions for CI/CD. The CI runs:
+
+- Unit tests on multiple platforms (Linux, macOS, Windows)
+- Backend-specific tests (CUDA, Metal, SYCL)
+- Integration tests with real models
+- Performance benchmarks
+- Code style checks
+
+<Warning>
+Some tests are disabled on certain platforms. Check `.github/workflows/` for platform-specific configurations.
+</Warning>
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Test Before Submitting" icon="clipboard-check">
+    Always run the full CI locally before opening a PR to catch issues early.
+  </Card>
+  
+  <Card title="Add Tests for New Features" icon="plus">
+    Every new feature should include corresponding tests to prevent regressions.
+  </Card>
+  
+  <Card title="Test Multiple Backends" icon="microchip">
+    If modifying ggml operations, test on CPU, CUDA, and Metal backends.
+  </Card>
+  
+  <Card title="Check Performance" icon="gauge">
+    Use llama-bench and llama-perplexity to verify no performance degradation.
+  </Card>
+</CardGroup>
+
+## Troubleshooting
+
+### Test Failures
+
+**Tests fail on CI but pass locally**
+- Ensure you're testing the same commit
+- Check if it's a platform-specific issue
+- Verify model files are the same version
+
+**Timeout errors**
+- Increase test timeout in CMakeLists.txt
+- Check for infinite loops or deadlocks
+- Run with smaller models for unit tests
+
+**Flaky tests**
+- Check for race conditions in multi-threaded code
+- Ensure tests don't depend on external state
+- Use fixed random seeds for reproducibility
+
+### Getting Help
+
+- Check [existing issues](https://github.com/ggml-org/llama.cpp/issues) for similar problems
+- Ask in [GitHub Discussions](https://github.com/ggml-org/llama.cpp/discussions)
+- Refer to [debugging documentation](https://github.com/ggml-org/llama.cpp/blob/master/docs/development/debugging-tests.md)
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Contributing" icon="code-pull-request" href="/development/contributing">
+    Learn the full contribution workflow and guidelines
+  </Card>
+  <Card title="Adding Models" icon="brain" href="/development/adding-models">
+    Understand how to add new model architectures
+  </Card>
+</CardGroup>

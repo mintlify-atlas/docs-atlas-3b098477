@@ -1,0 +1,456 @@
+---
+title: Completions
+description: OpenAI-compatible text completions endpoint
+---
+
+The `/v1/completions` endpoint provides simple text completion capabilities. Given a prompt, it returns the predicted continuation.
+
+## Endpoint
+
+```
+POST /v1/completions
+```
+
+## Request Format
+
+### Required Parameters
+
+<ParamField path="model" type="string" required>
+  Model identifier. Can be the model path, alias (set via `--alias`), or any string when using a single model.
+</ParamField>
+
+<ParamField path="prompt" type="string | array" required>
+  The text prompt to complete. Can be:
+  - A string: `"Once upon a time"`
+  - An array of token IDs: `[12, 34, 56]`
+  - An array of strings for batch completion: `["prompt1", "prompt2"]`
+  - Mixed tokens and strings: `[12, 34, "string", 56]`
+</ParamField>
+
+### Optional Parameters
+
+<ParamField path="max_tokens" type="number" default="-1">
+  Maximum number of tokens to generate. -1 means unlimited.
+</ParamField>
+
+<ParamField path="temperature" type="number" default="0.8">
+  Sampling temperature between 0 and 2. Higher values make output more random.
+</ParamField>
+
+<ParamField path="top_p" type="number" default="0.95">
+  Nucleus sampling: only tokens with cumulative probability up to `top_p` are considered.
+</ParamField>
+
+<ParamField path="top_k" type="number" default="40">
+  Limit token selection to the K most probable tokens. 0 = disabled.
+</ParamField>
+
+<ParamField path="min_p" type="number" default="0.05">
+  Minimum probability threshold relative to the most likely token.
+</ParamField>
+
+<ParamField path="stream" type="boolean" default="false">
+  Stream partial completions as Server-Sent Events.
+</ParamField>
+
+<ParamField path="stop" type="array">
+  Array of sequences where generation should stop. Stop words are not included in the output.
+</ParamField>
+
+<ParamField path="presence_penalty" type="number" default="0.0">
+  Penalize tokens based on whether they appear in the text. Range: -2.0 to 2.0.
+</ParamField>
+
+<ParamField path="frequency_penalty" type="number" default="0.0">
+  Penalize tokens based on their frequency. Range: -2.0 to 2.0.
+</ParamField>
+
+<ParamField path="repeat_penalty" type="number" default="1.1">
+  Control repetition of token sequences.
+</ParamField>
+
+<ParamField path="n" type="number" default="1">
+  Number of completions to generate for each prompt.
+</ParamField>
+
+<ParamField path="seed" type="number" default="-1">
+  Random seed for reproducible outputs. -1 = random seed.
+</ParamField>
+
+<ParamField path="logprobs" type="number">
+  Include the log probabilities on the most likely tokens. Maximum: 5.
+</ParamField>
+
+<ParamField path="echo" type="boolean" default="false">
+  Echo back the prompt in addition to the completion.
+</ParamField>
+
+<ParamField path="suffix" type="string">
+  Text that comes after the completion. Useful for code infilling.
+</ParamField>
+
+### llama.cpp-Specific Parameters
+
+<ParamField path="mirostat" type="number" default="0">
+  Enable Mirostat sampling. 0 = disabled, 1 = Mirostat, 2 = Mirostat 2.0.
+</ParamField>
+
+<ParamField path="mirostat_tau" type="number" default="5.0">
+  Mirostat target entropy (τ).
+</ParamField>
+
+<ParamField path="mirostat_eta" type="number" default="0.1">
+  Mirostat learning rate (η).
+</ParamField>
+
+<ParamField path="grammar" type="string">
+  BNF-like grammar to constrain generation.
+</ParamField>
+
+<ParamField path="json_schema" type="object">
+  JSON schema to constrain output to valid JSON matching the schema.
+</ParamField>
+
+<ParamField path="cache_prompt" type="boolean" default="true">
+  Reuse KV cache from previous requests for efficiency.
+</ParamField>
+
+## Request Examples
+
+<CodeGroup>
+```bash Basic Completion
+curl http://localhost:8080/v1/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer no-key" \
+  -d '{
+    "model": "gpt-3.5-turbo",
+    "prompt": "Once upon a time",
+    "max_tokens": 50,
+    "temperature": 0.7
+  }'
+```
+
+```python Python Client
+import openai
+
+client = openai.OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key="sk-no-key-required"
+)
+
+response = client.completions.create(
+    model="davinci-002",
+    prompt="I believe the meaning of life is",
+    max_tokens=50,
+    temperature=0.7
+)
+
+print(response.choices[0].text)
+```
+
+```bash Streaming Completion
+curl http://localhost:8080/v1/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-3.5-turbo",
+    "prompt": "Write a short poem about code:",
+    "max_tokens": 100,
+    "stream": true
+  }'
+```
+
+```bash Multiple Completions
+curl http://localhost:8080/v1/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-3.5-turbo",
+    "prompt": "The best programming language is",
+    "max_tokens": 10,
+    "n": 3,
+    "temperature": 1.0
+  }'
+```
+
+```bash JSON Schema Constraint
+curl http://localhost:8080/v1/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-3.5-turbo",
+    "prompt": "Generate a person object:",
+    "max_tokens": 100,
+    "json_schema": {
+      "type": "object",
+      "properties": {
+        "name": {"type": "string"},
+        "age": {"type": "number"},
+        "email": {"type": "string"}
+      },
+      "required": ["name", "age"]
+    }
+  }'
+```
+
+```bash With Stop Sequences
+curl http://localhost:8080/v1/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-3.5-turbo",
+    "prompt": "List three colors:\n1.",
+    "max_tokens": 50,
+    "stop": ["\n\n", "4."]
+  }'
+```
+</CodeGroup>
+
+## Response Format
+
+### Standard Response
+
+<ResponseField name="id" type="string">
+  Unique identifier for the completion.
+</ResponseField>
+
+<ResponseField name="object" type="string">
+  Always `"text_completion"` for non-streaming responses.
+</ResponseField>
+
+<ResponseField name="created" type="number">
+  Unix timestamp of creation time.
+</ResponseField>
+
+<ResponseField name="model" type="string">
+  The model used for completion.
+</ResponseField>
+
+<ResponseField name="choices" type="array">
+  Array of completion choices. Each choice contains:
+  - `text` (string) - The generated text
+  - `index` (number) - Choice index
+  - `logprobs` (object | null) - Log probabilities if requested
+  - `finish_reason` (string) - Why generation stopped: `stop`, `length`, or `null`
+</ResponseField>
+
+<ResponseField name="usage" type="object">
+  Token usage statistics:
+  - `prompt_tokens` (number) - Tokens in prompt
+  - `completion_tokens` (number) - Tokens generated
+  - `total_tokens` (number) - Sum of prompt and completion
+</ResponseField>
+
+### Example Response
+
+```json
+{
+  "id": "cmpl-abc123",
+  "object": "text_completion",
+  "created": 1677652288,
+  "model": "gpt-3.5-turbo",
+  "choices": [
+    {
+      "text": " in a small village nestled in the mountains. The villagers lived peaceful lives, tending to their crops and livestock. One day, a mysterious stranger arrived with tales of distant lands and ancient treasures.",
+      "index": 0,
+      "logprobs": null,
+      "finish_reason": "length"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 4,
+    "completion_tokens": 46,
+    "total_tokens": 50
+  }
+}
+```
+
+## Streaming Responses
+
+When `stream: true`, the server sends Server-Sent Events:
+
+```
+data: {"id":"cmpl-123","object":"text_completion","created":1677652288,"choices":[{"text":" in","index":0,"logprobs":null,"finish_reason":null}],"model":"gpt-3.5-turbo"}
+
+data: {"id":"cmpl-123","object":"text_completion","created":1677652288,"choices":[{"text":" a","index":0,"logprobs":null,"finish_reason":null}],"model":"gpt-3.5-turbo"}
+
+data: {"id":"cmpl-123","object":"text_completion","created":1677652288,"choices":[{"text":" small","index":0,"logprobs":null,"finish_reason":null}],"model":"gpt-3.5-turbo"}
+
+data: {"id":"cmpl-123","object":"text_completion","created":1677652288,"choices":[{"text":"","index":0,"logprobs":null,"finish_reason":"stop"}],"model":"gpt-3.5-turbo"}
+
+data: [DONE]
+```
+
+## Log Probabilities
+
+Request token probabilities with the `logprobs` parameter:
+
+```json
+{
+  "model": "gpt-3.5-turbo",
+  "prompt": "The sky is",
+  "max_tokens": 5,
+  "logprobs": 3
+}
+```
+
+Response includes probability data:
+
+```json
+{
+  "choices": [
+    {
+      "text": " blue",
+      "logprobs": {
+        "tokens": [" blue"],
+        "token_logprobs": [-0.0234],
+        "top_logprobs": [
+          {
+            " blue": -0.0234,
+            " clear": -3.8234,
+            " dark": -5.1234
+          }
+        ],
+        "text_offset": [0]
+      },
+      "finish_reason": "length"
+    }
+  ]
+}
+```
+
+## Batch Completions
+
+Generate multiple completions from different prompts:
+
+```json
+{
+  "model": "gpt-3.5-turbo",
+  "prompt": [
+    "The capital of France is",
+    "The capital of Germany is",
+    "The capital of Italy is"
+  ],
+  "max_tokens": 5
+}
+```
+
+Response contains completions for each prompt:
+
+```json
+{
+  "choices": [
+    {"text": " Paris", "index": 0, "finish_reason": "stop"},
+    {"text": " Berlin", "index": 1, "finish_reason": "stop"},
+    {"text": " Rome", "index": 2, "finish_reason": "stop"}
+  ]
+}
+```
+
+## Code Infilling
+
+Use the `suffix` parameter for code completion:
+
+```json
+{
+  "model": "codellama",
+  "prompt": "def fibonacci(n):\n    ",
+  "suffix": "\n    return result",
+  "max_tokens": 100
+}
+```
+
+The model will generate code that fits between the prompt and suffix.
+
+<Note>
+For more advanced code infilling, use the native `/infill` endpoint which supports repository-level context.
+</Note>
+
+## Grammar-Constrained Generation
+
+Constrain output using BNF grammar:
+
+```json
+{
+  "model": "gpt-3.5-turbo",
+  "prompt": "Generate a simple arithmetic expression:",
+  "max_tokens": 20,
+  "grammar": "root ::= expr\nexpr ::= term (('+' | '-') term)*\nterm ::= factor (('*' | '/') factor)*\nfactor ::= [0-9]+ | '(' expr ')'"
+}
+```
+
+## JSON Schema Constraint
+
+Force valid JSON output matching a schema:
+
+```json
+{
+  "model": "gpt-3.5-turbo",
+  "prompt": "Generate a product:",
+  "max_tokens": 100,
+  "json_schema": {
+    "type": "object",
+    "properties": {
+      "name": {"type": "string"},
+      "price": {"type": "number", "minimum": 0},
+      "in_stock": {"type": "boolean"},
+      "tags": {
+        "type": "array",
+        "items": {"type": "string"},
+        "minItems": 1,
+        "maxItems": 5
+      }
+    },
+    "required": ["name", "price"]
+  }
+}
+```
+
+## Mirostat Sampling
+
+Enable Mirostat for controlled perplexity:
+
+```json
+{
+  "model": "gpt-3.5-turbo",
+  "prompt": "Write a creative story:",
+  "max_tokens": 200,
+  "mirostat": 2,
+  "mirostat_tau": 5.0,
+  "mirostat_eta": 0.1
+}
+```
+
+Mirostat dynamically adjusts sampling to maintain target entropy (τ), useful for balancing coherence and creativity.
+
+## Performance Tips
+
+1. **Prompt caching**: Keep `cache_prompt: true` to reuse KV cache
+2. **Batch processing**: Send multiple prompts in one request for efficiency
+3. **Streaming**: Use `stream: true` for better perceived latency
+4. **Stop sequences**: Define clear stop conditions to avoid over-generation
+5. **Token limits**: Set appropriate `max_tokens` to prevent excessive computation
+
+## Error Responses
+
+```json
+{
+  "error": {
+    "message": "prompt is required",
+    "type": "invalid_request_error",
+    "code": 400
+  }
+}
+```
+
+Common errors:
+- `400` - Missing or invalid parameters
+- `401` - Invalid API key
+- `503` - Server not ready (model loading)
+
+## Differences from Chat Completions
+
+| Feature | Completions | Chat Completions |
+|---------|-------------|------------------|
+| Input format | Raw text prompt | Structured messages |
+| Use case | Simple continuation | Conversational AI |
+| Context | Single prompt | Multi-turn dialogue |
+| System prompts | Not supported | Supported |
+| Function calling | Not supported | Supported |
+| Best for | Text generation, code | Chat, assistants |

@@ -1,0 +1,477 @@
+---
+title: CLI Tool (llama-cli)
+description: Command-line interface for LLM inference with llama.cpp
+---
+
+The `llama-cli` tool provides a powerful command-line interface for running LLM inference. It supports interactive conversations, structured outputs, and various sampling configurations.
+
+## Quick Start
+
+<Steps>
+  <Step title="Load a model">
+    Start llama-cli with your GGUF model:
+    ```bash
+    ./llama-cli -m models/model.gguf
+    ```
+  </Step>
+  
+  <Step title="Add a prompt">
+    Generate text from a prompt:
+    ```bash
+    ./llama-cli -m models/model.gguf -p "Hello, how are you?"
+    ```
+  </Step>
+  
+  <Step title="Enable conversation mode">
+    Use `-cnv` for interactive chat:
+    ```bash
+    ./llama-cli -m models/model.gguf -cnv
+    ```
+  </Step>
+</Steps>
+
+## Loading Models
+
+### From Local Files
+
+```bash
+# Load a local GGUF model
+./llama-cli -m path/to/model.gguf
+```
+
+### From Hugging Face
+
+```bash
+# Download and load from Hugging Face (defaults to Q4_K_M quantization)
+./llama-cli -hf unsloth/phi-4-GGUF
+
+# Specify quantization level
+./llama-cli -hf unsloth/phi-4-GGUF:q8_0
+```
+
+<Note>
+When using `-hf`, llama-cli automatically downloads the model and any associated multimodal projectors (like for vision models). Use `--no-mmproj` to disable automatic projector loading.
+</Note>
+
+### From Docker Hub
+
+```bash
+# Load from Docker Hub repository
+./llama-cli -dr ai/gemma3
+```
+
+## Conversation Mode
+
+Conversation mode provides an interactive chat interface that automatically formats messages using the model's chat template.
+
+### Basic Conversation
+
+```bash
+# Enable conversation mode (auto-enabled for chat models)
+./llama-cli -m models/chat-model.gguf -cnv
+
+# With a system prompt
+./llama-cli -m models/chat-model.gguf -cnv -sys "You are a helpful coding assistant."
+```
+
+### Single-Turn Conversation
+
+```bash
+# Run a single conversation turn and exit
+./llama-cli -m models/model.gguf -cnv -st -p "What is the capital of France?"
+```
+
+### Conversation Options
+
+<ParamField path="-cnv, --conversation" type="boolean" default="auto">
+  Enable conversation mode. Automatically enabled if the model has a chat template.
+</ParamField>
+
+<ParamField path="-sys, --system-prompt" type="string">
+  System prompt to use with the model (if applicable based on chat template).
+</ParamField>
+
+<ParamField path="-st, --single-turn" type="boolean" default="false">
+  Run conversation for a single turn only, then exit when done.
+</ParamField>
+
+<ParamField path="-r, --reverse-prompt" type="string">
+  Halt generation at this prompt and return control in interactive mode.
+</ParamField>
+
+## Prompting
+
+### Direct Prompts
+
+```bash
+# Simple prompt
+./llama-cli -m model.gguf -p "Write a haiku about programming"
+
+# Longer prompt with escape sequences
+./llama-cli -m model.gguf -p "Line 1\nLine 2\nLine 3"
+
+# Disable escape sequence processing
+./llama-cli -m model.gguf --no-escape -p "Keep \n literal"
+```
+
+### From Files
+
+```bash
+# Load prompt from text file
+./llama-cli -m model.gguf -f prompt.txt
+
+# Load prompt from binary file
+./llama-cli -m model.gguf -bf prompt.bin
+
+# Load system prompt from file
+./llama-cli -m model.gguf -cnv -sysf system_prompt.txt
+```
+
+### Multiline Input
+
+```bash
+# Enable multiline input mode (no need for \ at line endings)
+./llama-cli -m model.gguf -cnv -mli
+```
+
+## Grammar Constraints
+
+Constrain model outputs to follow specific formats using BNF-like grammars or JSON schemas.
+
+### Using Grammar Files
+
+```bash
+# Use a BNF grammar to constrain output
+./llama-cli -m model.gguf -p "Generate a list" --grammar-file grammars/list.gbnf
+```
+
+### Inline Grammar
+
+```bash
+# Inline grammar definition
+./llama-cli -m model.gguf -p "Count to 5" --grammar 'root ::= [1-5] (" " [1-5])*'
+```
+
+### JSON Schema
+
+```bash
+# Constrain to JSON object matching a schema
+./llama-cli -m model.gguf -p "Generate user data" \
+  -j '{"type":"object","properties":{"name":{"type":"string"},"age":{"type":"number"}},"required":["name","age"]}'
+
+# Load schema from file
+./llama-cli -m model.gguf -p "Generate user data" -jf schema.json
+```
+
+<CodeGroup>
+```bash Example: List Grammar
+./llama-cli -m model.gguf \
+  -p "Generate a shopping list" \
+  --grammar 'root ::= item+; item ::= "- " [a-z]+ "\n"'
+```
+
+```bash Example: JSON Output
+./llama-cli -m model.gguf \
+  -p "Extract entities from: 'John Smith lives in New York'" \
+  -j '{"type":"object","properties":{"person":{"type":"string"},"location":{"type":"string"}}}'
+```
+</CodeGroup>
+
+<Note>
+For JSON schemas with external `$refs`, use `--grammar` combined with the `json_schema_to_grammar.py` conversion script instead.
+</Note>
+
+## Sampling Parameters
+
+Control how tokens are generated with various sampling strategies.
+
+### Temperature and Top-K/Top-P
+
+```bash
+# Adjust temperature (higher = more random)
+./llama-cli -m model.gguf -p "Write a story" --temp 0.9
+
+# Top-k sampling (limit to k most likely tokens)
+./llama-cli -m model.gguf -p "Complete: The sky is" --top-k 20
+
+# Top-p/nucleus sampling (cumulative probability threshold)
+./llama-cli -m model.gguf -p "Generate text" --top-p 0.9
+
+# Min-p sampling (minimum probability threshold)
+./llama-cli -m model.gguf -p "Generate text" --min-p 0.1
+```
+
+### Repetition Control
+
+```bash
+# Penalize repetition
+./llama-cli -m model.gguf -p "Tell me about" \
+  --repeat-penalty 1.2 \
+  --repeat-last-n 128
+
+# DRY (Don't Repeat Yourself) sampling
+./llama-cli -m model.gguf -p "Write code" \
+  --dry-multiplier 0.8 \
+  --dry-base 1.75
+```
+
+### Advanced Sampling
+
+```bash
+# Mirostat sampling (perplexity control)
+./llama-cli -m model.gguf -p "Generate" \
+  --mirostat 2 \
+  --mirostat-lr 0.1 \
+  --mirostat-ent 5.0
+
+# Dynamic temperature
+./llama-cli -m model.gguf -p "Write" \
+  --dynatemp-range 0.5 \
+  --dynatemp-exp 1.0
+```
+
+### Sampler Order
+
+```bash
+# Customize sampler sequence
+./llama-cli -m model.gguf -p "Text" \
+  --samplers "top_k;top_p;temperature"
+
+# Or use simplified sequence notation
+./llama-cli -m model.gguf -p "Text" \
+  --sampler-seq "kymt"
+```
+
+## Context and Generation Control
+
+### Context Window
+
+```bash
+# Set context size (0 = use model default)
+./llama-cli -m model.gguf -c 4096 -p "Long prompt..."
+
+# Keep specific tokens from initial prompt
+./llama-cli -m model.gguf --keep 10 -p "Important context here..."
+
+# Enable context shift for infinite generation
+./llama-cli -m model.gguf --context-shift -p "Start"
+```
+
+### Generation Length
+
+```bash
+# Generate specific number of tokens (-1 = infinite)
+./llama-cli -m model.gguf -n 100 -p "Generate exactly 100 tokens"
+
+# Stop at specific words
+./llama-cli -m model.gguf -p "Count: " -r "ten"
+```
+
+### Batch Processing
+
+```bash
+# Adjust batch sizes for performance
+./llama-cli -m model.gguf \
+  -b 2048 \    # logical batch size
+  -ub 512 \    # physical batch size
+  -p "Prompt"
+```
+
+## GPU Acceleration
+
+```bash
+# Offload all layers to GPU
+./llama-cli -m model.gguf -ngl 99 -p "Fast inference"
+
+# Offload specific number of layers
+./llama-cli -m model.gguf -ngl 32 -p "Partial GPU"
+
+# Split across multiple GPUs
+./llama-cli -m model.gguf \
+  -ngl 99 \
+  -sm layer \
+  -ts 3,1 \  # 3:1 ratio across 2 GPUs
+  -p "Multi-GPU inference"
+```
+
+## Advanced Features
+
+### LoRA Adapters
+
+```bash
+# Load single LoRA adapter
+./llama-cli -m model.gguf --lora adapter.gguf -p "Specialized task"
+
+# Load multiple adapters with scaling
+./llama-cli -m model.gguf \
+  --lora-scaled "adapter1.gguf:0.5,adapter2.gguf:1.0" \
+  -p "Multi-adapter inference"
+```
+
+### Control Vectors
+
+```bash
+# Apply control vector to influence model behavior
+./llama-cli -m model.gguf \
+  --control-vector vector.gguf \
+  --control-vector-layer-range 0 20 \
+  -p "Generate with control"
+```
+
+### Reasoning Models
+
+```bash
+# Enable reasoning/thinking for models like DeepSeek-R1
+./llama-cli -m deepseek-r1.gguf \
+  --reasoning-format deepseek \
+  --reasoning-budget -1 \
+  -p "Solve this problem step by step"
+```
+
+## Performance Options
+
+### Threading
+
+```bash
+# Set CPU threads for generation
+./llama-cli -m model.gguf -t 8 -p "Prompt"
+
+# Different threads for batch processing
+./llama-cli -m model.gguf -t 8 -tb 16 -p "Prompt"
+```
+
+### Memory Optimization
+
+```bash
+# Keep model in RAM (prevent swapping)
+./llama-cli -m model.gguf --mlock -p "Prompt"
+
+# Disable memory mapping
+./llama-cli -m model.gguf --no-mmap -p "Prompt"
+
+# Use Flash Attention
+./llama-cli -m model.gguf -fa on -p "Prompt"
+```
+
+### KV Cache Configuration
+
+```bash
+# Quantize KV cache for memory savings
+./llama-cli -m model.gguf \
+  -ctk q8_0 \  # K cache type
+  -ctv q8_0 \  # V cache type
+  -p "Prompt"
+```
+
+## Common Use Cases
+
+### Code Completion
+
+```bash
+./llama-cli -m codellama.gguf \
+  -p "def fibonacci(n):\n    \"\"\"Calculate fibonacci number\"\"\"\n    " \
+  --temp 0.2 \
+  --repeat-penalty 1.1 \
+  -n 200
+```
+
+### Creative Writing
+
+```bash
+./llama-cli -m creative-model.gguf \
+  -cnv \
+  -sys "You are a creative storytelling assistant." \
+  -p "Write a short story about a robot learning to paint" \
+  --temp 0.9 \
+  --top-p 0.95
+```
+
+### Structured Data Extraction
+
+```bash
+./llama-cli -m model.gguf \
+  -p "Extract product info: 'iPhone 15 Pro costs $999, available in blue'" \
+  -j '{"type":"object","properties":{"product":{"type":"string"},"price":{"type":"number"},"color":{"type":"string"}}}' \
+  --temp 0.1
+```
+
+## Output Control
+
+### Display Options
+
+```bash
+# Disable prompt display
+./llama-cli -m model.gguf --no-display-prompt -p "Hidden prompt"
+
+# Disable colored output
+./llama-cli -m model.gguf -co off -p "No colors"
+
+# Show timing information
+./llama-cli -m model.gguf --show-timings -p "Benchmark"
+
+# Include special tokens in output
+./llama-cli -m model.gguf -sp -p "Show all tokens"
+```
+
+### Simple I/O Mode
+
+```bash
+# Use basic I/O for better subprocess compatibility
+./llama-cli -m model.gguf --simple-io -p "Pipe-friendly output"
+```
+
+## Environment Variables
+
+Many parameters can be set via environment variables:
+
+```bash
+# Set model path
+export LLAMA_ARG_MODEL="models/model.gguf"
+
+# Set context size
+export LLAMA_ARG_CTX_SIZE=4096
+
+# Set GPU layers
+export LLAMA_ARG_N_GPU_LAYERS=99
+
+# Then run without flags
+./llama-cli -p "Using env vars"
+```
+
+<Note>
+Command-line arguments take precedence over environment variables when both are set.
+</Note>
+
+## Logging
+
+```bash
+# Set verbosity level (0-4, higher = more verbose)
+./llama-cli -m model.gguf -lv 4 -p "Debug mode"
+
+# Disable all logging
+./llama-cli -m model.gguf --log-disable -p "Silent mode"
+
+# Log to file
+export LLAMA_LOG_FILE="llama.log"
+./llama-cli -m model.gguf -p "Logged run"
+
+# Enable timestamps in logs
+./llama-cli -m model.gguf --log-timestamps -p "Timestamped logs"
+```
+
+## See Also
+
+<CardGroup cols={2}>
+  <Card title="Server" icon="server" href="/inference/server">
+    OpenAI-compatible API server
+  </Card>
+  <Card title="Embeddings" icon="diagram-project" href="/inference/embeddings">
+    Generate text embeddings
+  </Card>
+  <Card title="Multimodal" icon="image" href="/inference/multimodal">
+    Vision and audio models
+  </Card>
+  <Card title="Speculative Decoding" icon="forward-fast" href="/inference/speculative-decoding">
+    Accelerate generation with draft models
+  </Card>
+</CardGroup>

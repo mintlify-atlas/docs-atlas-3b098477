@@ -1,0 +1,524 @@
+---
+title: CMake Presets
+description: Using CMake presets for quick and consistent builds across platforms
+---
+
+## Overview
+
+CMake presets provide predefined build configurations in `CMakePresets.json`. They simplify building by bundling common options into named configurations.
+
+## Using Presets
+
+Use presets with the `--preset` flag:
+
+```bash
+cmake --preset <preset-name>
+cmake --build build-<preset-name>
+```
+
+<Note>
+  The build directory name includes the preset name: `build-<preset-name>`
+</Note>
+
+## Available Presets
+
+### Linux Presets
+
+<Tabs>
+  <Tab title="GCC">
+    **x64-linux-gcc-debug**
+    ```bash
+    cmake --preset x64-linux-gcc-debug
+    cmake --build build-x64-linux-gcc-debug
+    ```
+    Debug build with GCC compiler
+
+    **x64-linux-gcc-release**
+    ```bash
+    cmake --preset x64-linux-gcc-release
+    cmake --build build-x64-linux-gcc-release
+    ```
+    Release build with GCC compiler
+
+    **x64-linux-gcc-reldbg**
+    ```bash
+    cmake --preset x64-linux-gcc-reldbg
+    cmake --build build-x64-linux-gcc-reldbg
+    ```
+    Release with debug info (RelWithDebInfo)
+
+    **x64-linux-gcc+static-release**
+    ```bash
+    cmake --preset x64-linux-gcc+static-release
+    cmake --build build-x64-linux-gcc+static-release
+    ```
+    Static release build with GCC
+  </Tab>
+</Tabs>
+
+### Windows Presets
+
+<Tabs>
+  <Tab title="LLVM/Clang (x64)">
+    **x64-windows-llvm-debug**
+    ```bash
+    cmake --preset x64-windows-llvm-debug
+    cmake --build build-x64-windows-llvm-debug
+    ```
+    Debug build with LLVM/Clang
+
+    **x64-windows-llvm-release**
+    ```bash
+    cmake --preset x64-windows-llvm-release
+    cmake --build build-x64-windows-llvm-release
+    ```
+    Release build with LLVM/Clang
+
+    **x64-windows-llvm-reldbg**
+    ```bash
+    cmake --preset x64-windows-llvm-reldbg
+    cmake --build build-x64-windows-llvm-reldbg
+    ```
+    Release with debug info
+
+    **x64-windows-llvm+static-release**
+    ```bash
+    cmake --preset x64-windows-llvm+static-release
+    cmake --build build-x64-windows-llvm+static-release
+    ```
+    Static release build
+  </Tab>
+
+  <Tab title="LLVM/Clang (ARM64)">
+    **arm64-windows-llvm-debug**
+    ```bash
+    cmake --preset arm64-windows-llvm-debug
+    cmake --build build-arm64-windows-llvm-debug
+    ```
+    Debug build for Windows on ARM
+
+    **arm64-windows-llvm-release**
+    ```bash
+    cmake --preset arm64-windows-llvm-release
+    cmake --build build-arm64-windows-llvm-release
+    ```
+    Release build for Windows on ARM
+
+    **arm64-windows-llvm+static-release**
+    ```bash
+    cmake --preset arm64-windows-llvm+static-release
+    cmake --build build-arm64-windows-llvm+static-release
+    ```
+    Static release for Windows on ARM
+  </Tab>
+
+  <Tab title="MSVC">
+    **x64-windows-msvc-debug**
+    ```bash
+    cmake --preset x64-windows-msvc-debug
+    cmake --build build-x64-windows-msvc-debug
+    ```
+    Debug build with MSVC
+
+    **x64-windows-msvc-release**
+    ```bash
+    cmake --preset x64-windows-msvc-release
+    cmake --build build-x64-windows-msvc-release
+    ```
+    Release build with MSVC (RelWithDebInfo)
+
+    **x64-windows-msvc+static-release**
+    ```bash
+    cmake --preset x64-windows-msvc+static-release
+    cmake --build build-x64-windows-msvc+static-release
+    ```
+    Static release with MSVC
+  </Tab>
+
+  <Tab title="SYCL (Intel GPU)">
+    **x64-windows-sycl-debug**
+    ```bash
+    cmake --preset x64-windows-sycl-debug
+    cmake --build build-x64-windows-sycl-debug
+    ```
+    Debug build with SYCL support
+
+    **x64-windows-sycl-debug-f16**
+    ```bash
+    cmake --preset x64-windows-sycl-debug-f16
+    cmake --build build-x64-windows-sycl-debug-f16
+    ```
+    Debug build with FP16 support
+
+    **x64-windows-sycl-release**
+    ```bash
+    cmake --preset x64-windows-sycl-release
+    cmake --build build-x64-windows-sycl-release
+    ```
+    Release build with SYCL
+
+    **x64-windows-sycl-release-f16**
+    ```bash
+    cmake --preset x64-windows-sycl-release-f16
+    cmake --build build-x64-windows-sycl-release-f16
+    ```
+    Release build with FP16 support
+  </Tab>
+
+  <Tab title="Vulkan">
+    **x64-windows-vulkan-debug**
+    ```bash
+    cmake --preset x64-windows-vulkan-debug
+    cmake --build build-x64-windows-vulkan-debug
+    ```
+    Debug build with Vulkan support
+
+    **x64-windows-vulkan-release**
+    ```bash
+    cmake --preset x64-windows-vulkan-release
+    cmake --build build-x64-windows-vulkan-release
+    ```
+    Release build with Vulkan support
+  </Tab>
+</Tabs>
+
+### macOS Presets
+
+**arm64-apple-clang-debug**
+```bash
+cmake --preset arm64-apple-clang-debug
+cmake --build build-arm64-apple-clang-debug
+```
+Debug build for Apple Silicon
+
+**arm64-apple-clang-release**
+```bash
+cmake --preset arm64-apple-clang-release
+cmake --build build-arm64-apple-clang-release
+```
+Release build for Apple Silicon (RelWithDebInfo)
+
+**arm64-apple-clang+static-release**
+```bash
+cmake --preset arm64-apple-clang+static-release
+cmake --build build-arm64-apple-clang+static-release
+```
+Static release for Apple Silicon
+
+## Listing Available Presets
+
+To see all available presets:
+
+```bash
+cmake --list-presets
+```
+
+Example output:
+```
+Available configure presets:
+
+  "x64-linux-gcc-debug"
+  "x64-linux-gcc-release"
+  "x64-linux-gcc-reldbg"
+  "x64-linux-gcc+static-release"
+  "arm64-windows-llvm-debug"
+  "arm64-windows-llvm-release"
+  ...
+```
+
+## Preset Architecture
+
+### Base Presets
+
+Presets inherit from hidden base configurations:
+
+- **base**: Common settings for all presets
+  - Generator: Ninja
+  - Build directory: `build-${presetName}`
+  - Export compile commands: ON
+  - Install RPATH: `$ORIGIN;$ORIGIN/..`
+
+- **sycl-base**: Base for SYCL builds
+  - Compilers: icx (C++), cl (C)
+  - SYCL enabled
+
+### Build Type Presets (Hidden)
+
+These are combined with other presets:
+
+- **debug**: `CMAKE_BUILD_TYPE=Debug`
+- **release**: `CMAKE_BUILD_TYPE=Release`
+- **reldbg**: `CMAKE_BUILD_TYPE=RelWithDebInfo`
+- **static**: `GGML_STATIC=ON`
+
+### Platform Presets (Hidden)
+
+- **x64-windows-llvm**: Uses x64-windows-llvm.cmake toolchain
+- **arm64-windows-llvm**: Uses arm64-windows-llvm.cmake toolchain
+- **arm64-apple-clang**: Uses arm64-apple-clang.cmake toolchain
+- **x64-linux-gcc**: Uses GCC compiler
+
+## Customizing Presets
+
+### Adding CMake Options to Presets
+
+You can add additional options when using presets:
+
+```bash Windows ARM with OpenMP disabled
+cmake --preset arm64-windows-llvm-release -DGGML_OPENMP=OFF
+cmake --build build-arm64-windows-llvm-release
+```
+
+```bash Linux with CUDA
+cmake --preset x64-linux-gcc-release -DGGML_CUDA=ON
+cmake --build build-x64-linux-gcc-release
+```
+
+### Creating Custom Presets
+
+You can create a `CMakeUserPresets.json` file (git-ignored) for personal presets:
+
+```json CMakeUserPresets.json
+{
+  "version": 4,
+  "configurePresets": [
+    {
+      "name": "my-cuda-build",
+      "inherits": "x64-linux-gcc-release",
+      "cacheVariables": {
+        "GGML_CUDA": "ON",
+        "CMAKE_CUDA_ARCHITECTURES": "86"
+      }
+    },
+    {
+      "name": "my-vulkan-debug",
+      "inherits": "x64-linux-gcc-debug",
+      "cacheVariables": {
+        "GGML_VULKAN": "ON",
+        "GGML_VULKAN_VALIDATE": "ON"
+      }
+    }
+  ]
+}
+```
+
+Then use your custom preset:
+
+```bash
+cmake --preset my-cuda-build
+cmake --build build-my-cuda-build
+```
+
+## Preset Structure Reference
+
+Each preset in `CMakePresets.json` contains:
+
+| Field | Description |
+|-------|-------------|
+| `name` | Preset identifier |
+| `hidden` | If true, preset is only for inheritance |
+| `inherits` | Array of base presets to inherit from |
+| `generator` | CMake generator (e.g., "Ninja") |
+| `binaryDir` | Build output directory |
+| `cacheVariables` | CMake cache variables (options) |
+| `architecture` | Target architecture settings |
+| `toolset` | Toolset configuration |
+
+Example from `CMakePresets.json`:
+
+```json
+{
+  "name": "x64-windows-llvm-release",
+  "inherits": [
+    "base",
+    "x64-windows-llvm",
+    "release"
+  ]
+}
+```
+
+This preset:
+1. Uses Ninja generator (from `base`)
+2. Uses LLVM toolchain (from `x64-windows-llvm`)
+3. Sets Release build type (from `release`)
+
+## Common Workflows
+
+### Development Cycle
+
+<Steps>
+  <Step title="Choose debug preset">
+    Select appropriate debug preset for your platform:
+    ```bash
+    cmake --preset x64-linux-gcc-debug
+    ```
+  </Step>
+
+  <Step title="Build">
+    ```bash
+    cmake --build build-x64-linux-gcc-debug
+    ```
+  </Step>
+
+  <Step title="Test changes">
+    ```bash
+    ./build-x64-linux-gcc-debug/bin/llama-cli -m model.gguf --version
+    ```
+  </Step>
+
+  <Step title="Rebuild after changes">
+    CMake automatically detects changes:
+    ```bash
+    cmake --build build-x64-linux-gcc-debug
+    ```
+  </Step>
+</Steps>
+
+### Release Build
+
+<Steps>
+  <Step title="Clean previous builds (optional)">
+    ```bash
+    rm -rf build-*
+    ```
+  </Step>
+
+  <Step title="Configure release preset">
+    ```bash
+    cmake --preset x64-linux-gcc-release
+    ```
+  </Step>
+
+  <Step title="Build with parallel jobs">
+    ```bash
+    cmake --build build-x64-linux-gcc-release -j $(nproc)
+    ```
+  </Step>
+
+  <Step title="Install (optional)">
+    ```bash
+    cmake --install build-x64-linux-gcc-release --prefix /usr/local
+    ```
+  </Step>
+</Steps>
+
+### Multi-Configuration Build
+
+Build multiple configurations simultaneously:
+
+```bash
+# Configure all
+cmake --preset x64-linux-gcc-debug
+cmake --preset x64-linux-gcc-release
+cmake --preset x64-linux-gcc+static-release
+
+# Build all
+cmake --build build-x64-linux-gcc-debug &
+cmake --build build-x64-linux-gcc-release &
+cmake --build build-x64-linux-gcc+static-release &
+wait
+```
+
+## Platform-Specific Notes
+
+### Windows
+
+<Note>
+  Use Developer Command Prompt for Visual Studio when using MSVC or LLVM presets.
+</Note>
+
+For ARM64 builds:
+```bash
+cmake --preset arm64-windows-llvm-release
+cmake --build build-arm64-windows-llvm-release
+```
+
+### macOS
+
+Apple Silicon (M1/M2/M3) builds:
+```bash
+cmake --preset arm64-apple-clang-release
+cmake --build build-arm64-apple-clang-release
+```
+
+<Note>
+  Metal is enabled by default on macOS. The preset does not disable it.
+</Note>
+
+### Linux
+
+For production deployments:
+```bash
+cmake --preset x64-linux-gcc+static-release
+cmake --build build-x64-linux-gcc+static-release
+```
+
+Static builds are self-contained and easier to distribute.
+
+## Troubleshooting
+
+### Preset Not Found
+
+```bash
+CMake Error: No such preset in .../CMakePresets.json: 'invalid-preset'
+```
+
+**Solution**: List available presets:
+```bash
+cmake --list-presets
+```
+
+### Wrong Generator
+
+If Ninja is not installed:
+
+```bash
+CMake Error: Could not create named generator Ninja
+```
+
+**Solution**: Install Ninja:
+<CodeGroup>
+
+```bash Debian/Ubuntu
+sudo apt-get install ninja-build
+```
+
+```bash Fedora
+sudo dnf install ninja-build
+```
+
+```bash macOS
+brew install ninja
+```
+
+```bash Windows
+choco install ninja
+```
+
+</CodeGroup>
+
+### Build Directory Exists
+
+```bash
+CMake Error: Build directory already configured with different preset
+```
+
+**Solution**: Remove and reconfigure:
+```bash
+rm -rf build-<preset-name>
+cmake --preset <preset-name>
+```
+
+## Best Practices
+
+1. **Use presets for consistency**: Ensures reproducible builds across team members
+2. **Create user presets**: Use `CMakeUserPresets.json` for personal configurations
+3. **Version control**: Commit `CMakePresets.json`, ignore `CMakeUserPresets.json`
+4. **Name conventions**: Follow existing naming patterns for clarity
+5. **Build isolation**: Each preset uses separate build directory
+
+## Further Reading
+
+- [CMake Build Options](/development/build-options) - Detailed option reference
+- [Building from Source](/development/building) - Complete build guide
+- [CMake Presets Documentation](https://cmake.org/cmake/help/latest/manual/cmake-presets.7.html) - Official CMake docs

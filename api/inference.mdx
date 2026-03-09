@@ -1,0 +1,648 @@
+---
+title: 'Inference'
+description: 'Running inference with llama_decode, batching, and KV cache management'
+---
+
+## Context Creation
+
+Before running inference, create a context from a loaded model:
+
+```c
+LLAMA_API struct llama_context * llama_init_from_model(
+    struct llama_model * model,
+    struct llama_context_params params
+);
+```
+
+<ParamField path="model" type="llama_model *">
+  Previously loaded model
+</ParamField>
+
+<ParamField path="params" type="struct llama_context_params">
+  Context configuration parameters
+</ParamField>
+
+<ResponseField name="return" type="llama_context *">
+  Returns context pointer, or `NULL` on failure
+</ResponseField>
+
+### Example
+
+```c
+llama_context_params params = llama_context_default_params();
+params.n_ctx = 2048;
+params.n_batch = 512;
+params.n_threads = 8;
+
+llama_context * ctx = llama_init_from_model(model, params);
+if (ctx == NULL) {
+    fprintf(stderr, "Failed to create context\n");
+    return 1;
+}
+```
+
+## Context Parameters
+
+```c
+struct llama_context_params {
+    uint32_t n_ctx;              // Text context size (0 = from model)
+    uint32_t n_batch;            // Logical maximum batch size
+    uint32_t n_ubatch;           // Physical maximum batch size
+    uint32_t n_seq_max;          // Max number of sequences
+    int32_t  n_threads;          // Threads for generation
+    int32_t  n_threads_batch;    // Threads for batch processing
+    
+    enum llama_rope_scaling_type rope_scaling_type;
+    enum llama_pooling_type      pooling_type;
+    enum llama_attention_type    attention_type;
+    enum llama_flash_attn_type   flash_attn_type;
+    
+    // RoPE parameters
+    float    rope_freq_base;
+    float    rope_freq_scale;
+    float    yarn_ext_factor;
+    float    yarn_attn_factor;
+    float    yarn_beta_fast;
+    float    yarn_beta_slow;
+    uint32_t yarn_orig_ctx;
+    
+    // Callbacks
+    ggml_backend_sched_eval_callback cb_eval;
+    void * cb_eval_user_data;
+    ggml_abort_callback abort_callback;
+    void * abort_callback_data;
+    
+    // KV cache types [EXPERIMENTAL]
+    enum ggml_type type_k;
+    enum ggml_type type_v;
+    
+    // Flags
+    bool embeddings;   // Extract embeddings
+    bool offload_kqv;  // Offload KQV ops to GPU
+    bool no_perf;      // Disable performance timings
+    bool op_offload;   // Offload host tensor operations
+    bool swa_full;     // Use full-size SWA cache
+    bool kv_unified;   // Use unified buffer for attention
+};
+```
+
+### Key Parameters
+
+<ParamField path="n_ctx" type="uint32_t" default="from model">
+  Text context window size. Maximum number of tokens the model can attend to. Use `0` to use the model's training context size.
+  
+  ```c
+  params.n_ctx = 2048;  // 2K context
+  params.n_ctx = 4096;  // 4K context
+  params.n_ctx = 0;     // Use model default
+  ```
+</ParamField>
+
+<ParamField path="n_batch" type="uint32_t" default="2048">
+  Logical maximum batch size for `llama_decode()`. Controls how many tokens can be processed in a single call.
+  
+  ```c
+  params.n_batch = 512;  // Process up to 512 tokens at once
+  ```
+</ParamField>
+
+<ParamField path="n_ubatch" type="uint32_t" default="512">
+  Physical maximum batch size. The logical batch is split into physical batches of this size for processing.
+  
+  ```c
+  params.n_ubatch = 256;  // Process in chunks of 256 tokens
+  ```
+</ParamField>
+
+<ParamField path="n_threads" type="int32_t" default="auto">
+  Number of threads for single-token generation (autoregressive decoding).
+  
+  ```c
+  params.n_threads = 8;
+  ```
+</ParamField>
+
+<ParamField path="n_threads_batch" type="int32_t" default="auto">
+  Number of threads for prompt processing and batch operations.
+  
+  ```c
+  params.n_threads_batch = 16;  // More threads for parallel prompt processing
+  ```
+</ParamField>
+
+<Note>
+After creating a context, query the actual values using `llama_n_ctx()`, `llama_n_batch()`, etc., as they may differ from requested values.
+</Note>
+
+## The Batch Structure
+
+```c
+typedef struct llama_batch {
+    int32_t n_tokens;           // Number of tokens in this batch
+    
+    llama_token  * token;       // Token IDs (when embd is NULL)
+    float        * embd;        // Token embeddings (when token is NULL)
+    llama_pos    * pos;         // Token positions (NULL = auto-track)
+    int32_t      * n_seq_id;    // Number of sequence IDs per token
+    llama_seq_id ** seq_id;     // Sequence IDs per token (NULL = seq 0)
+    int8_t       * logits;      // Output logits flag (NULL = last only)
+} llama_batch;
+```
+
+### Creating Batches
+
+<CodeGroup>
+```c Simple Batch (Single Sequence)
+// Helper for single sequence with auto-tracked positions
+llama_batch llama_batch_get_one(
+    llama_token * tokens,
+    int32_t n_tokens
+);
+
+// Usage
+llama_token tokens[] = {1, 2, 3, 4, 5};
+llama_batch batch = llama_batch_get_one(tokens, 5);
+```
+
+```c Advanced Batch (Heap Allocated)
+// Allocate batch with custom capacity
+llama_batch llama_batch_init(
+    int32_t n_tokens,    // Maximum tokens
+    int32_t embd,        // Embedding size (0 = use tokens)
+    int32_t n_seq_max    // Max sequences per token
+);
+
+// Free batch
+void llama_batch_free(struct llama_batch batch);
+
+// Usage
+llama_batch batch = llama_batch_init(512, 0, 1);
+// ... use batch ...
+llama_batch_free(batch);
+```
+</CodeGroup>
+
+## Decoding
+
+### llama_decode
+
+Process a batch of tokens through the decoder:
+
+```c
+LLAMA_API int32_t llama_decode(
+    struct llama_context * ctx,
+    struct llama_batch batch
+);
+```
+
+<ParamField path="ctx" type="llama_context *">
+  Context with memory for KV cache
+</ParamField>
+
+<ParamField path="batch" type="llama_batch">
+  Batch of tokens to process
+</ParamField>
+
+<ResponseField name="return" type="int32_t">
+  - `0`: Success
+  - `1`: No KV slot available (try smaller batch or larger context)
+  - `2`: Aborted by callback
+  - `-1`: Invalid input batch
+  - `< -1`: Fatal error
+</ResponseField>
+
+<Note>
+`llama_decode()` requires the context to have memory. For encoder-decoder models, this processes the batch using the decoder.
+</Note>
+
+### llama_encode
+
+Process a batch using the encoder (for encoder-decoder models):
+
+```c
+LLAMA_API int32_t llama_encode(
+    struct llama_context * ctx,
+    struct llama_batch batch
+);
+```
+
+<ResponseField name="return" type="int32_t">
+  - `0`: Success
+  - `< 0`: Error (memory state restored)
+</ResponseField>
+
+<Note>
+`llama_encode()` does not use the KV cache. It stores encoder output internally for later use by decoder's cross-attention.
+</Note>
+
+### Basic Inference Loop
+
+<CodeGroup>
+```c Simple Generation
+// Tokenize prompt
+std::vector<llama_token> tokens = /* ... tokenize prompt ... */;
+
+// Process prompt
+llama_batch batch = llama_batch_get_one(tokens.data(), tokens.size());
+if (llama_decode(ctx, batch) != 0) {
+    fprintf(stderr, "Failed to decode prompt\n");
+    return 1;
+}
+
+// Generate tokens
+for (int i = 0; i < n_predict; i++) {
+    // Sample next token
+    llama_token token = llama_sampler_sample(sampler, ctx, -1);
+    
+    // Check for end of generation
+    if (llama_vocab_is_eog(vocab, token)) {
+        break;
+    }
+    
+    // Decode single token
+    batch = llama_batch_get_one(&token, 1);
+    if (llama_decode(ctx, batch) != 0) {
+        fprintf(stderr, "Failed to decode token\n");
+        return 1;
+    }
+}
+```
+
+```c Encoder-Decoder Model
+// Encode input
+llama_batch encoder_batch = llama_batch_get_one(
+    input_tokens.data(), 
+    input_tokens.size()
+);
+
+if (llama_encode(ctx, encoder_batch) != 0) {
+    fprintf(stderr, "Encoding failed\n");
+    return 1;
+}
+
+// Get decoder start token
+llama_token decoder_start = llama_model_decoder_start_token(model);
+if (decoder_start == LLAMA_TOKEN_NULL) {
+    decoder_start = llama_vocab_bos(vocab);
+}
+
+// Decode
+llama_batch decoder_batch = llama_batch_get_one(&decoder_start, 1);
+if (llama_decode(ctx, decoder_batch) != 0) {
+    fprintf(stderr, "Decoding failed\n");
+    return 1;
+}
+
+// Continue generation...
+```
+</CodeGroup>
+
+## Getting Logits and Embeddings
+
+### Logits
+
+```c
+// Get all logits (for tokens where batch.logits[i] != 0)
+float * llama_get_logits(struct llama_context * ctx);
+
+// Get logits for ith token (supports negative indexing)
+float * llama_get_logits_ith(struct llama_context * ctx, int32_t i);
+```
+
+<CodeGroup>
+```c Using logits
+// Get logits for last token
+float * logits = llama_get_logits_ith(ctx, -1);
+int32_t n_vocab = llama_vocab_n_tokens(vocab);
+
+// Find token with highest probability
+llama_token max_token = 0;
+float max_logit = logits[0];
+for (int32_t i = 1; i < n_vocab; i++) {
+    if (logits[i] > max_logit) {
+        max_logit = logits[i];
+        max_token = i;
+    }
+}
+```
+</CodeGroup>
+
+### Embeddings
+
+```c
+// Get all embeddings
+float * llama_get_embeddings(struct llama_context * ctx);
+
+// Get embedding for ith token
+float * llama_get_embeddings_ith(struct llama_context * ctx, int32_t i);
+
+// Get embedding for sequence
+float * llama_get_embeddings_seq(struct llama_context * ctx, llama_seq_id seq_id);
+```
+
+<Note>
+Enable embeddings by setting `ctx_params.embeddings = true` during context creation.
+</Note>
+
+## Memory Management (KV Cache)
+
+The KV cache stores key-value pairs for efficient attention computation:
+
+```c
+// Get memory handle from context
+llama_memory_t llama_get_memory(const struct llama_context * ctx);
+
+// Clear all memory (data = true also clears data buffers)
+void llama_memory_clear(llama_memory_t mem, bool data);
+```
+
+### Sequence Operations
+
+<CodeGroup>
+```c Remove Tokens
+// Remove tokens in range [p0, p1) for sequence
+bool llama_memory_seq_rm(
+    llama_memory_t mem,
+    llama_seq_id seq_id,  // -1 = all sequences
+    llama_pos p0,         // -1 = 0
+    llama_pos p1          // -1 = inf
+);
+
+// Example: Remove first 10 tokens from sequence 0
+llama_memory_seq_rm(mem, 0, 0, 10);
+
+// Remove all tokens from sequence 1
+llama_memory_seq_rm(mem, 1, -1, -1);
+```
+
+```c Copy Sequence
+// Copy tokens from one sequence to another
+void llama_memory_seq_cp(
+    llama_memory_t mem,
+    llama_seq_id seq_id_src,
+    llama_seq_id seq_id_dst,
+    llama_pos p0,
+    llama_pos p1
+);
+
+// Example: Copy sequence 0 to sequence 1
+llama_memory_seq_cp(mem, 0, 1, 0, -1);
+```
+
+```c Keep/Shift Tokens
+// Keep only specified sequence
+void llama_memory_seq_keep(llama_memory_t mem, llama_seq_id seq_id);
+
+// Add relative position offset
+void llama_memory_seq_add(
+    llama_memory_t mem,
+    llama_seq_id seq_id,
+    llama_pos p0,
+    llama_pos p1,
+    llama_pos delta
+);
+
+// Divide positions by factor
+void llama_memory_seq_div(
+    llama_memory_t mem,
+    llama_seq_id seq_id,
+    llama_pos p0,
+    llama_pos p1,
+    int d
+);
+```
+
+```c Query Sequence
+// Get position range for sequence
+llama_pos llama_memory_seq_pos_min(llama_memory_t mem, llama_seq_id seq_id);
+llama_pos llama_memory_seq_pos_max(llama_memory_t mem, llama_seq_id seq_id);
+
+// Returns -1 if sequence is empty
+// All positions in [pos_min, pos_max] are guaranteed present
+```
+</CodeGroup>
+
+### Parallel Decoding Example
+
+<CodeGroup>
+```c Multiple Sequences
+// Process multiple independent sequences in parallel
+llama_batch batch = llama_batch_init(512, 0, 4);  // Max 4 sequences
+
+batch.n_tokens = 4;
+batch.token    = (llama_token[]){101, 102, 103, 104};
+batch.pos      = (llama_pos[]){0, 0, 0, 0};
+batch.n_seq_id = (int32_t[]){1, 1, 1, 1};
+
+// Assign to different sequences
+llama_seq_id seq_id_0[] = {0};
+llama_seq_id seq_id_1[] = {1};
+llama_seq_id seq_id_2[] = {2};
+llama_seq_id seq_id_3[] = {3};
+
+batch.seq_id = (llama_seq_id*[]){seq_id_0, seq_id_1, seq_id_2, seq_id_3};
+batch.logits = (int8_t[]){1, 1, 1, 1};  // Get logits for all
+
+if (llama_decode(ctx, batch) != 0) {
+    fprintf(stderr, "Parallel decode failed\n");
+}
+
+// Sample for each sequence
+for (int i = 0; i < 4; i++) {
+    llama_token token = llama_get_logits_ith(ctx, i);
+    // Process token for sequence i
+}
+```
+</CodeGroup>
+
+## State Persistence
+
+Save and restore context state:
+
+<CodeGroup>
+```c Full State
+// Get state size
+size_t llama_state_get_size(struct llama_context * ctx);
+
+// Save state to buffer
+size_t llama_state_get_data(
+    struct llama_context * ctx,
+    uint8_t * dst,
+    size_t size
+);
+
+// Restore state from buffer
+size_t llama_state_set_data(
+    struct llama_context * ctx,
+    const uint8_t * src,
+    size_t size
+);
+
+// Save/load state from file
+bool llama_state_save_file(
+    struct llama_context * ctx,
+    const char * path_session,
+    const llama_token * tokens,
+    size_t n_token_count
+);
+
+bool llama_state_load_file(
+    struct llama_context * ctx,
+    const char * path_session,
+    llama_token * tokens_out,
+    size_t n_token_capacity,
+    size_t * n_token_count_out
+);
+```
+
+```c Per-Sequence State
+// Get size for single sequence
+size_t llama_state_seq_get_size(
+    struct llama_context * ctx,
+    llama_seq_id seq_id
+);
+
+// Save/restore sequence state
+size_t llama_state_seq_get_data(
+    struct llama_context * ctx,
+    uint8_t * dst,
+    size_t size,
+    llama_seq_id seq_id
+);
+
+size_t llama_state_seq_set_data(
+    struct llama_context * ctx,
+    const uint8_t * src,
+    size_t size,
+    llama_seq_id dest_seq_id
+);
+```
+</CodeGroup>
+
+## Thread Control
+
+```c
+// Set number of threads (can be changed during inference)
+void llama_set_n_threads(
+    struct llama_context * ctx,
+    int32_t n_threads,        // For generation
+    int32_t n_threads_batch   // For batch processing
+);
+
+// Query current thread counts
+int32_t llama_n_threads(struct llama_context * ctx);
+int32_t llama_n_threads_batch(struct llama_context * ctx);
+```
+
+## Synchronization
+
+```c
+// Wait for all computations to finish
+void llama_synchronize(struct llama_context * ctx);
+```
+
+<Note>
+This is automatically called when getting logits/embeddings. Explicit calls are rarely needed.
+</Note>
+
+## Cleanup
+
+```c
+// Free context
+void llama_free(struct llama_context * ctx);
+```
+
+Always free contexts before freeing the associated model.
+
+## Complete Inference Example
+
+<CodeGroup>
+```c inference.c
+#include "llama.h"
+#include <stdio.h>
+#include <vector>
+
+int main() {
+    // Load model (see model-loading.mdx)
+    llama_backend_init();
+    llama_model_params mparams = llama_model_default_params();
+    llama_model * model = llama_model_load_from_file("model.gguf", mparams);
+    
+    // Create context
+    llama_context_params cparams = llama_context_default_params();
+    cparams.n_ctx = 2048;
+    cparams.n_batch = 512;
+    cparams.n_threads = 8;
+    
+    llama_context * ctx = llama_init_from_model(model, cparams);
+    const llama_vocab * vocab = llama_model_get_vocab(model);
+    llama_memory_t mem = llama_get_memory(ctx);
+    
+    // Tokenize
+    const char * prompt = "The capital of France is";
+    std::vector<llama_token> tokens(256);
+    int n_tokens = llama_tokenize(vocab, prompt, strlen(prompt),
+                                   tokens.data(), tokens.size(), true, false);
+    tokens.resize(n_tokens);
+    
+    // Process prompt
+    llama_batch batch = llama_batch_get_one(tokens.data(), tokens.size());
+    if (llama_decode(ctx, batch) != 0) {
+        fprintf(stderr, "Failed to process prompt\n");
+        return 1;
+    }
+    
+    // Create sampler
+    llama_sampler * sampler = llama_sampler_chain_init(
+        llama_sampler_chain_default_params()
+    );
+    llama_sampler_chain_add(sampler, llama_sampler_init_greedy());
+    
+    // Generate
+    int n_gen = 0;
+    while (n_gen < 50) {
+        llama_token token = llama_sampler_sample(sampler, ctx, -1);
+        
+        if (llama_vocab_is_eog(vocab, token)) {
+            break;
+        }
+        
+        // Print token
+        char buf[128];
+        int n = llama_token_to_piece(vocab, token, buf, sizeof(buf), 0, true);
+        printf("%.*s", n, buf);
+        fflush(stdout);
+        
+        // Decode next token
+        batch = llama_batch_get_one(&token, 1);
+        if (llama_decode(ctx, batch) != 0) {
+            fprintf(stderr, "Failed to decode\n");
+            break;
+        }
+        
+        n_gen++;
+    }
+    
+    printf("\n");
+    
+    // Cleanup
+    llama_sampler_free(sampler);
+    llama_free(ctx);
+    llama_model_free(model);
+    llama_backend_free();
+    
+    return 0;
+}
+```
+</CodeGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Sampling" icon="dice" href="/api/sampling">
+    Learn about token sampling strategies
+  </Card>
+  <Card title="libllama Overview" icon="book" href="/api/libllama">
+    Return to API overview
+  </Card>
+</CardGroup>

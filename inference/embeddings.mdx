@@ -1,0 +1,585 @@
+---
+title: Embeddings
+description: Generate text embeddings with llama.cpp for semantic search and similarity
+---
+
+llama.cpp provides multiple ways to generate embeddings - high-dimensional vector representations of text that capture semantic meaning. These embeddings are essential for semantic search, similarity comparison, and retrieval-augmented generation (RAG).
+
+## Overview
+
+Embeddings convert text into dense numerical vectors that preserve semantic relationships. Similar texts produce similar embeddings, making them useful for:
+
+- **Semantic search**: Find documents by meaning rather than keyword matching
+- **Similarity measurement**: Compare texts for similarity
+- **Clustering**: Group similar documents together
+- **Classification**: Train classifiers on embedding features
+- **Retrieval-Augmented Generation (RAG)**: Retrieve relevant context for LLM prompts
+
+## Quick Start
+
+<Steps>
+  <Step title="Start the server">
+    Launch llama-server with an embedding model:
+    ```bash
+    ./llama-server -m embedding-model.gguf --embeddings --pooling mean
+    ```
+  </Step>
+  
+  <Step title="Generate embeddings">
+    Make a request to the embeddings endpoint:
+    ```bash
+    curl http://localhost:8080/v1/embeddings \
+      -H "Content-Type: application/json" \
+      -d '{
+        "input": "Hello, world!",
+        "model": "text-embedding"
+      }'
+    ```
+  </Step>
+  
+  <Step title="Process the results">
+    The response contains normalized embedding vectors:
+    ```json
+    {
+      "object": "list",
+      "data": [{
+        "object": "embedding",
+        "embedding": [0.023, -0.015, 0.042, ...],
+        "index": 0
+      }]
+    }
+    ```
+  </Step>
+</Steps>
+
+## Using llama-server
+
+The server provides both OpenAI-compatible and custom embedding endpoints.
+
+### Starting an Embedding Server
+
+```bash
+# Basic embedding server
+./llama-server -m embedding-model.gguf --embeddings --pooling mean
+
+# With larger batch size for throughput
+./llama-server -m embedding-model.gguf --embeddings --pooling mean -ub 8192
+
+# With GPU acceleration
+./llama-server -m embedding-model.gguf --embeddings --pooling mean -ngl 99
+```
+
+<Note>
+The `--embeddings` flag restricts the server to only support embedding use cases. Use this flag with dedicated embedding models for optimal performance.
+</Note>
+
+### Pooling Types
+
+Pooling determines how token embeddings are combined into a single vector:
+
+<ParamField path="--pooling" type="string" default="model default">
+  Pooling method for embeddings:
+  - `none`: Return embeddings for all tokens (no pooling)
+  - `mean`: Average of all token embeddings
+  - `cls`: Use the CLS token embedding
+  - `last`: Use the last token embedding
+  - `rank`: For reranking models
+</ParamField>
+
+```bash
+# Mean pooling (most common)
+./llama-server -m model.gguf --embeddings --pooling mean
+
+# CLS token (for BERT-style models)
+./llama-server -m model.gguf --embeddings --pooling cls
+
+# Last token (for some decoder models)
+./llama-server -m model.gguf --embeddings --pooling last
+```
+
+## OpenAI-Compatible API
+
+The `/v1/embeddings` endpoint follows the OpenAI API specification.
+
+### Single Input
+
+```bash
+curl http://localhost:8080/v1/embeddings \
+  -H "Content-Type: application/json" \
+  -d '{
+    "input": "The quick brown fox jumps over the lazy dog",
+    "model": "text-embedding",
+    "encoding_format": "float"
+  }'
+```
+
+### Multiple Inputs (Batching)
+
+```bash
+curl http://localhost:8080/v1/embeddings \
+  -H "Content-Type: application/json" \
+  -d '{
+    "input": [
+      "First document to embed",
+      "Second document to embed",
+      "Third document to embed"
+    ],
+    "model": "text-embedding"
+  }'
+```
+
+### Response Format
+
+```json
+{
+  "object": "list",
+  "data": [
+    {
+      "object": "embedding",
+      "embedding": [0.0234, -0.0145, 0.0421, ..., 0.0089],
+      "index": 0
+    },
+    {
+      "object": "embedding",
+      "embedding": [0.0198, -0.0167, 0.0389, ..., 0.0102],
+      "index": 1
+    }
+  ],
+  "model": "text-embedding",
+  "usage": {
+    "prompt_tokens": 24,
+    "total_tokens": 24
+  }
+}
+```
+
+<Note>
+The `/v1/embeddings` endpoint requires a pooling type other than `none` and returns normalized embeddings using the Euclidean norm.
+</Note>
+
+## Custom Embedding API
+
+The `/embedding` endpoint provides more flexibility than the OpenAI-compatible endpoint.
+
+### Basic Request
+
+```bash
+curl http://localhost:8080/embedding \
+  -H "Content-Type: application/json" \
+  -d '{
+    "content": "Text to embed"
+  }'
+```
+
+### Normalization Options
+
+```bash
+curl http://localhost:8080/embedding \
+  -H "Content-Type: application/json" \
+  -d '{
+    "content": "Text to embed",
+    "embd_normalize": 2
+  }'
+```
+
+<ParamField path="embd_normalize" type="integer" default="2">
+  Normalization method for embeddings:
+  - `-1`: No normalization
+  - `0`: Max absolute (scale to int16 range)
+  - `1`: Taxicab / L1 norm
+  - `2`: Euclidean / L2 norm (default)
+  - `>2`: P-norm with specified p value
+</ParamField>
+
+### Non-OpenAI `/embeddings` Endpoint
+
+The `/embeddings` endpoint (without `/v1`) supports all pooling types including `none`:
+
+```bash
+# Start server with no pooling
+./llama-server -m model.gguf --embeddings --pooling none
+
+# Get embeddings for all tokens
+curl http://localhost:8080/embeddings \
+  -H "Content-Type: application/json" \
+  -d '{
+    "input": "Generate per-token embeddings"
+  }'
+```
+
+**Response format (pooling = none):**
+
+```json
+[
+  {
+    "index": 0,
+    "embedding": [
+      [0.023, -0.015, ...],  // token 0
+      [0.019, -0.021, ...],  // token 1
+      [0.031, -0.018, ...],  // token 2
+      ...
+    ]
+  }
+]
+```
+
+## Using llama-embedding CLI
+
+The `llama-embedding` command-line tool generates embeddings directly without running a server.
+
+### Basic Usage
+
+```bash
+# Generate embedding for text
+./llama-embedding -m model.gguf --pooling mean -p "Hello World!" --log-disable
+```
+
+### Output Formats
+
+<CodeGroup>
+```bash Raw Output (Default)
+./llama-embedding -m model.gguf --pooling mean \
+  -p "Text to embed" \
+  --log-disable
+
+# Output: space-separated floats
+0.0234 -0.0145 0.0421 ... 0.0089
+```
+
+```bash JSON Format
+./llama-embedding -m model.gguf --pooling mean \
+  -p "Text to embed" \
+  --embd-output-format json \
+  --log-disable
+
+# OpenAI-style JSON output
+```
+
+```bash Array Format
+./llama-embedding -m model.gguf --pooling mean \
+  -p "Text to embed" \
+  --embd-output-format array \
+  --log-disable
+
+# Output: [[0.0234, -0.0145, 0.0421, ...]]
+```
+</CodeGroup>
+
+### Multiple Inputs
+
+Generate embeddings for multiple texts using a separator:
+
+```bash
+./llama-embedding -m model.gguf --pooling mean \
+  -p "First text<#sep#>Second text<#sep#>Third text" \
+  --embd-separator "<#sep#>" \
+  --embd-normalize 2 \
+  --embd-output-format array \
+  --log-disable
+```
+
+### Advanced Options
+
+```bash
+./llama-embedding -m model.gguf \
+  --pooling mean \
+  -p "Text to embed" \
+  --embd-normalize 2 \          # L2 normalization
+  --embd-output-format json \   # JSON output
+  --n-gpu-layers 99 \           # GPU acceleration
+  --log-disable                 # Suppress logs
+```
+
+## Similarity Calculation
+
+Once you have embeddings, calculate similarity using cosine similarity:
+
+### Cosine Similarity Formula
+
+```
+similarity = (A · B) / (||A|| × ||B||)
+```
+
+For normalized embeddings (L2 norm), this simplifies to the dot product:
+
+```
+similarity = A · B
+```
+
+### Python Example
+
+```python
+import numpy as np
+import requests
+
+def get_embedding(text):
+    response = requests.post(
+        "http://localhost:8080/v1/embeddings",
+        json={"input": text, "model": "text-embedding"}
+    )
+    return np.array(response.json()["data"][0]["embedding"])
+
+# Get embeddings
+emb1 = get_embedding("The cat sits on the mat")
+emb2 = get_embedding("A feline rests on the rug")
+emb3 = get_embedding("Python programming language")
+
+# Calculate cosine similarity (embeddings are already normalized)
+print(f"Cat vs Feline: {np.dot(emb1, emb2):.3f}")  # High similarity
+print(f"Cat vs Python: {np.dot(emb1, emb3):.3f}")  # Low similarity
+```
+
+### JavaScript Example
+
+```javascript
+async function getEmbedding(text) {
+  const response = await fetch('http://localhost:8080/v1/embeddings', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ input: text, model: 'text-embedding' })
+  });
+  const data = await response.json();
+  return data.data[0].embedding;
+}
+
+function cosineSimilarity(a, b) {
+  return a.reduce((sum, val, i) => sum + val * b[i], 0);
+}
+
+// Calculate similarity
+const emb1 = await getEmbedding('The cat sits on the mat');
+const emb2 = await getEmbedding('A feline rests on the rug');
+console.log('Similarity:', cosineSimilarity(emb1, emb2));
+```
+
+## Multimodal Embeddings
+
+Some models support generating embeddings from images or audio in addition to text.
+
+### Image Embeddings
+
+```bash
+# Start server with multimodal model
+./llama-server -hf ggml-org/gemma-3-4b-it-GGUF --embeddings --pooling mean
+
+# Generate image embedding
+curl http://localhost:8080/embedding \
+  -H "Content-Type: application/json" \
+  -d '{
+    "content": {"prompt_string": "Image description", "multimodal_data": ["base64_image_data"]}
+  }'
+```
+
+See the [Multimodal documentation](/inference/multimodal) for details on image and audio input formats.
+
+## Embedding Models
+
+### Recommended Models
+
+Popular embedding models available in GGUF format:
+
+- **sentence-transformers/all-MiniLM-L6-v2**: Lightweight, fast, 384 dimensions
+- **BAAI/bge-small-en-v1.5**: Strong performance, 384 dimensions
+- **BAAI/bge-base-en-v1.5**: Balanced quality/speed, 768 dimensions
+- **BAAI/bge-large-en-v1.5**: High quality, 1024 dimensions
+- **Alibaba-NLP/gte-large-en-v1.5**: Excellent for retrieval, 1024 dimensions
+- **intfloat/e5-large-v2**: Strong general-purpose, 1024 dimensions
+
+### Finding GGUF Embedding Models
+
+Search Hugging Face for GGUF embedding models:
+
+```
+https://huggingface.co/models?pipeline_tag=feature-extraction&search=gguf
+```
+
+### Using with llama-server
+
+```bash
+# Download from Hugging Face
+./llama-server -hf sentence-transformers/all-MiniLM-L6-v2-GGUF --embeddings --pooling mean
+
+# Or use local file
+./llama-server -m all-MiniLM-L6-v2.gguf --embeddings --pooling mean
+```
+
+## Reranking
+
+Reranking models score document relevance for a given query, useful for improving search results.
+
+### Starting a Reranking Server
+
+```bash
+./llama-server -m bge-reranker-v2-m3.gguf --embedding --pooling rank --rerank
+```
+
+### Reranking API
+
+```bash
+curl http://localhost:8080/v1/rerank \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "reranker",
+    "query": "What is a panda?",
+    "documents": [
+      "A panda is a type of fish",
+      "The giant panda is a bear species endemic to China",
+      "Pandas are black and white animals",
+      "Programming pandas is a data analysis library"
+    ],
+    "top_n": 2
+  }'
+```
+
+**Response:**
+
+```json
+{
+  "results": [
+    {"index": 1, "relevance_score": 0.95, "document": "The giant panda is..."},
+    {"index": 2, "relevance_score": 0.78, "document": "Pandas are black..."}
+  ]
+}
+```
+
+### Recommended Reranking Models
+
+- **BAAI/bge-reranker-v2-m3**: Multilingual reranking
+- **BAAI/bge-reranker-large**: English reranking
+
+## Use Cases
+
+### Semantic Search
+
+<Steps>
+  <Step title="Index documents">
+    Generate embeddings for all documents in your corpus:
+    ```python
+    documents = ["doc1 text", "doc2 text", "doc3 text"]
+    embeddings = [get_embedding(doc) for doc in documents]
+    ```
+  </Step>
+  
+  <Step title="Embed query">
+    Generate embedding for the search query:
+    ```python
+    query_embedding = get_embedding("search query")
+    ```
+  </Step>
+  
+  <Step title="Find similar documents">
+    Calculate similarity and rank:
+    ```python
+    similarities = [np.dot(query_embedding, emb) for emb in embeddings]
+    top_docs = sorted(zip(documents, similarities), key=lambda x: -x[1])
+    ```
+  </Step>
+</Steps>
+
+### RAG (Retrieval-Augmented Generation)
+
+<Steps>
+  <Step title="Build vector database">
+    Store document embeddings in a vector database (FAISS, Pinecone, Weaviate, etc.)
+  </Step>
+  
+  <Step title="Retrieve context">
+    For a user query, find the most similar documents
+  </Step>
+  
+  <Step title="Generate response">
+    Pass retrieved documents as context to the LLM:
+    ```python
+    context = "\n\n".join(retrieved_docs)
+    prompt = f"Context:\n{context}\n\nQuestion: {query}\nAnswer:"
+    ```
+  </Step>
+</Steps>
+
+### Document Clustering
+
+```python
+from sklearn.cluster import KMeans
+import numpy as np
+
+# Get embeddings for documents
+documents = ["doc1", "doc2", "doc3", ...]
+embeddings = np.array([get_embedding(doc) for doc in documents])
+
+# Cluster documents
+kmeans = KMeans(n_clusters=5)
+clusters = kmeans.fit_predict(embeddings)
+
+# Group documents by cluster
+for cluster_id in range(5):
+    cluster_docs = [doc for doc, c in zip(documents, clusters) if c == cluster_id]
+    print(f"Cluster {cluster_id}: {len(cluster_docs)} documents")
+```
+
+## Performance Optimization
+
+### Batch Processing
+
+```bash
+# Increase batch size for higher throughput
+./llama-server -m model.gguf --embeddings --pooling mean -ub 8192 -b 4096
+```
+
+### GPU Acceleration
+
+```bash
+# Offload to GPU for faster embedding generation
+./llama-server -m model.gguf --embeddings --pooling mean -ngl 99
+```
+
+### Caching
+
+For repeated queries, cache embeddings to avoid recomputation:
+
+```python
+import functools
+
+@functools.lru_cache(maxsize=1000)
+def get_embedding_cached(text):
+    return get_embedding(text)
+```
+
+## Troubleshooting
+
+### Error: "Pooling type required"
+
+Ensure you specify a pooling method:
+
+```bash
+./llama-server -m model.gguf --embeddings --pooling mean
+```
+
+### Poor Embedding Quality
+
+- Ensure you're using a proper embedding model (not a chat/completion model)
+- Check that the pooling method matches the model's training
+- Verify normalization is enabled for similarity comparisons
+
+### Low Throughput
+
+- Increase batch size: `-ub 8192 -b 4096`
+- Enable GPU offload: `-ngl 99`
+- Use smaller embedding models
+- Process documents in batches via the API
+
+## See Also
+
+<CardGroup cols={2}>
+  <Card title="Server" icon="server" href="/inference/server">
+    Full server API documentation
+  </Card>
+  <Card title="Multimodal" icon="image" href="/inference/multimodal">
+    Image and audio embeddings
+  </Card>
+  <Card title="CLI Tool" icon="terminal" href="/inference/cli">
+    Command-line inference
+  </Card>
+  <Card title="Speculative Decoding" icon="forward-fast" href="/inference/speculative-decoding">
+    Speed up text generation
+  </Card>
+</CardGroup>

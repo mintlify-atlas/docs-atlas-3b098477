@@ -1,80 +1,306 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quick Start
+description: Get started with llama.cpp in minutes - install, download a model, and run your first inference
 ---
 
-## Get started in three steps
+Get up and running with llama.cpp quickly. This guide walks you through installation, downloading a model, and running your first inference.
 
-Get your documentation site running locally and make your first customization.
+## Installation
 
-### Step 1: Set up your local environment
+<Steps>
+  <Step title="Install llama.cpp">
+    Choose your preferred installation method:
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+    <CodeGroup>
+      ```bash macOS/Linux (Homebrew)
+      brew install llama.cpp
+      ```
 
-### Step 2: Deploy your changes
+      ```bash Windows (Winget)
+      winget install llama.cpp
+      ```
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+      ```bash Nix (Flakes)
+      nix profile install nixpkgs#llama-cpp
+      ```
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+      ```bash macOS (MacPorts)
+      sudo port install llama.cpp
+      ```
+    </CodeGroup>
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+    <Note>
+      For GPU acceleration, custom builds, or other installation options, see the [Installation Guide](/installation).
+    </Note>
+  </Step>
 
-### Step 3: Go live
+  <Step title="Verify installation">
+    Check that llama.cpp is installed correctly:
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+    ```bash
+    llama-cli --version
+    ```
 
-## Next steps
+    You should see version information displayed in the output.
+  </Step>
 
-Now that you have your docs running, explore these key features:
+  <Step title="Download a model">
+    llama.cpp works with models in GGUF format. You can download pre-quantized models directly from Hugging Face.
+
+    <Note>
+      GGUF is the native format for llama.cpp. Many popular models are available pre-converted on Hugging Face.
+    </Note>
+
+    **Option 1: Download automatically during inference**
+
+    llama.cpp can download models directly from Hugging Face when you run inference:
+
+    ```bash
+    # llama.cpp will download the model automatically
+    llama-cli -hf ggml-org/gemma-3-1b-it-GGUF
+    ```
+
+    **Option 2: Download manually**
+
+    Visit [Hugging Face's GGUF models](https://huggingface.co/models?library=gguf&sort=trending) and download your preferred model. Popular options include:
+
+    - [Llama models](https://huggingface.co/models?sort=trending&search=llama+gguf)
+    - [Mistral models](https://huggingface.co/models?search=mistral+gguf)
+    - [Gemma models](https://huggingface.co/models?search=gemma+gguf)
+
+    Look for files with the `.gguf` extension, typically with quantization levels like `Q4_0` or `Q8_0`.
+  </Step>
+
+  <Step title="Run your first inference">
+    Now you're ready to run inference! Here are the two main ways to use llama.cpp:
+
+    <Tabs>
+      <Tab title="Interactive CLI">
+        Start an interactive conversation with the model:
+
+        ```bash
+        # Using a downloaded model
+        llama-cli -m path/to/model.gguf
+
+        # Or download from Hugging Face
+        llama-cli -hf ggml-org/gemma-3-1b-it-GGUF
+        ```
+
+        The CLI will enter conversation mode automatically for chat-tuned models. Type your messages and press Enter to interact.
+
+        **Example conversation:**
+        ```bash
+        > hi, who are you?
+        Hi there! I'm your helpful assistant! I'm an AI-powered chatbot 
+        designed to assist and provide information to users like you.
+
+        > what is 1+1?
+        Easy peasy! The answer to 1+1 is... 2!
+        ```
+      </Tab>
+
+      <Tab title="OpenAI-Compatible Server">
+        Launch an HTTP server with an OpenAI-compatible API:
+
+        ```bash
+        # Start the server
+        llama-server -hf ggml-org/gemma-3-1b-it-GGUF --port 8080
+
+        # Or with a local model
+        llama-server -m path/to/model.gguf --port 8080
+        ```
+
+        Once running, you can:
+        - Access the web UI at `http://localhost:8080`
+        - Use the chat completions endpoint at `http://localhost:8080/v1/chat/completions`
+        - Send requests using the OpenAI Python SDK or any HTTP client
+
+        **Example with curl:**
+        ```bash
+        curl http://localhost:8080/v1/chat/completions \
+          -H "Content-Type: application/json" \
+          -d '{
+            "messages": [{"role": "user", "content": "Hello!"}]
+          }'
+        ```
+      </Tab>
+    </Tabs>
+  </Step>
+</Steps>
+
+## Common Use Cases
 
 <CardGroup cols={2}>
+  <Card title="Text Generation" icon="wand-magic-sparkles">
+    Generate creative content, complete prompts, or continue text:
 
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
+    ```bash
+    llama-cli -m model.gguf -p "Once upon a time" -n 256
+    ```
+  </Card>
 
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
+  <Card title="Conversation Mode" icon="comments">
+    Chat interactively with AI models:
 
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
+    ```bash
+    llama-cli -m model.gguf -cnv
+    ```
+  </Card>
 
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
+  <Card title="API Server" icon="server">
+    Host models as an OpenAI-compatible API:
 
+    ```bash
+    llama-server -m model.gguf --port 8080
+    ```
+  </Card>
+
+  <Card title="JSON Output" icon="code">
+    Constrain output to valid JSON:
+
+    ```bash
+    llama-cli -m model.gguf \
+      --grammar-file grammars/json.gbnf \
+      -p "Request: schedule a call at 8pm; Command:"
+    ```
+  </Card>
 </CardGroup>
 
+## GPU Acceleration
+
+For significantly faster inference, enable GPU acceleration:
+
+<CodeGroup>
+  ```bash NVIDIA (CUDA)
+  # Use the --n-gpu-layers flag to offload layers to GPU
+  llama-cli -m model.gguf -ngl 99
+  ```
+
+  ```bash AMD (ROCm)
+  llama-cli -m model.gguf -ngl 99
+  ```
+
+  ```bash Apple Silicon (Metal)
+  # Metal is enabled by default on macOS
+  llama-cli -m model.gguf -ngl 99
+  ```
+
+  ```bash Intel GPU (SYCL)
+  llama-cli -m model.gguf -ngl 99
+  ```
+</CodeGroup>
+
 <Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
+  The `-ngl` (or `--n-gpu-layers`) flag specifies how many model layers to offload to the GPU. Using `-ngl 99` typically offloads all layers for most models.
 </Note>
+
+<Warning>
+  GPU acceleration requires building llama.cpp from source with the appropriate backend enabled. Pre-built binaries from package managers typically only include CPU support. See the [Installation Guide](/installation) for details.
+</Warning>
+
+## Performance Tips
+
+<AccordionGroup>
+  <Accordion title="Choose the right quantization">
+    Model quantization affects both speed and quality:
+
+    - **Q4_0**: Fast, smallest size, lower quality
+    - **Q5_1**: Balanced speed and quality
+    - **Q8_0**: Slower, higher quality, larger size
+
+    Start with Q4_0 for testing, then try higher quantizations if quality isn't sufficient.
+  </Accordion>
+
+  <Accordion title="Adjust context size">
+    The context window affects memory usage:
+
+    ```bash
+    # Default context is usually 512-2048 tokens
+    # Increase for longer conversations (uses more memory)
+    llama-cli -m model.gguf -c 4096
+    ```
+  </Accordion>
+
+  <Accordion title="Use multiple threads">
+    Specify the number of CPU threads to use:
+
+    ```bash
+    # Use 8 threads for faster CPU inference
+    llama-cli -m model.gguf -t 8
+    ```
+  </Accordion>
+
+  <Accordion title="Enable parallel requests (server)">
+    Handle multiple users simultaneously:
+
+    ```bash
+    # Support 4 concurrent requests, each with 4096 max context
+    llama-server -m model.gguf -c 16384 -np 4
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Learn about all installation methods including building from source with GPU support
+  </Card>
+
+  <Card title="CLI Reference" icon="terminal" href="/cli">
+    Explore all available command-line options and flags
+  </Card>
+
+  <Card title="Server API" icon="plug" href="/server">
+    Set up and use the OpenAI-compatible HTTP server
+  </Card>
+
+  <Card title="Model Conversion" icon="rotate" href="/model-conversion">
+    Convert and quantize your own models to GGUF format
+  </Card>
+</CardGroup>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Model fails to load">
+    **Issue**: Error loading model file
+
+    **Solutions**:
+    - Verify the model file exists and path is correct
+    - Check file permissions
+    - Ensure the model is in GGUF format (not PyTorch or safetensors)
+    - Try downloading the model again if it may be corrupted
+  </Accordion>
+
+  <Accordion title="Out of memory errors">
+    **Issue**: Not enough RAM/VRAM to load the model
+
+    **Solutions**:
+    - Use a smaller model or lower quantization (e.g., Q4_0 instead of Q8_0)
+    - Reduce context size with `-c 512`
+    - For GPU: Reduce layers offloaded with a lower `-ngl` value
+    - Close other applications to free up memory
+  </Accordion>
+
+  <Accordion title="Slow inference speed">
+    **Issue**: Generation is too slow
+
+    **Solutions**:
+    - Build with GPU support and use `-ngl 99`
+    - Use a smaller model
+    - Use a lower quantization (Q4_0)
+    - Increase CPU threads with `-t`
+    - Check that no other heavy processes are running
+  </Accordion>
+
+  <Accordion title="GPU not being used">
+    **Issue**: GPU acceleration not working despite using `-ngl`
+
+    **Solutions**:
+    - Verify llama.cpp was built with GPU support (check build output)
+    - Check that GPU drivers are installed and up to date
+    - Try `--device` flag to explicitly select GPU
+    - Run `llama-cli --list-devices` to see available devices
+  </Accordion>
+</AccordionGroup>

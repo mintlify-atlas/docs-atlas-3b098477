@@ -1,0 +1,467 @@
+---
+title: "Function Calling"
+description: "Use function calling and tool use with llama.cpp models"
+---
+
+# Function Calling
+
+llama.cpp supports [OpenAI-style function calling](https://platform.openai.com/docs/guides/function-calling) for ~any model through native and generic handlers.
+
+## Overview
+
+Function calling allows models to:
+- Call external tools and APIs
+- Execute code and retrieve results
+- Access real-time data (web search, calculators, databases)
+- Perform structured actions based on user requests
+
+<Note>
+Function calling is implemented in `common/chat.h` and used by `llama-server` when started with the `--jinja` flag.
+</Note>
+
+## Supported Models
+
+### Native Format Support
+
+These models have optimized native function calling handlers:
+
+- **Llama 3.1 / 3.2 / 3.3** — Including builtin tools (`wolfram_alpha`, `brave_search`, `code_interpreter`)
+- **Functionary v3.1 / v3.2** — Dedicated function calling models
+- **Hermes 2/3** — Strong tool use capabilities
+- **Qwen 2.5 / Qwen 2.5 Coder** — Native tool calling support
+- **Mistral Nemo** — Function calling enabled
+- **Firefunction v2** — Specialized for function calls
+- **Command R7B** — With reasoning extraction
+- **DeepSeek R1** — Experimental support
+
+### Generic Format Support
+
+<Info>
+When a model's chat template isn't recognized, llama.cpp falls back to generic function calling support. You'll see `Chat format: Generic` in the logs.
+</Info>
+
+Generic support works with any model but:
+- May consume more tokens than native format
+- May be less efficient
+- Can be overridden with `--chat-template-file`
+
+## Basic Usage
+
+### Server Setup
+
+Start llama-server with function calling enabled:
+
+```bash
+llama-server -m model.gguf --jinja
+```
+
+Or with a custom chat template:
+
+```bash
+llama-server -m model.gguf \
+  --chat-template-file templates/custom.jinja
+```
+
+### Define Functions
+
+Define available functions in your API request:
+
+```json
+{
+  "model": "model.gguf",
+  "messages": [
+    {"role": "user", "content": "What's the weather in San Francisco?"}
+  ],
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "get_weather",
+        "description": "Get current weather for a location",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "location": {
+              "type": "string",
+              "description": "City and state, e.g. San Francisco, CA"
+            },
+            "unit": {
+              "type": "string",
+              "enum": ["celsius", "fahrenheit"],
+              "description": "Temperature unit"
+            }
+          },
+          "required": ["location"]
+        }
+      }
+    }
+  ]
+}
+```
+
+### Handle Tool Calls
+
+The model will respond with a tool call:
+
+```json
+{
+  "choices": [
+    {
+      "message": {
+        "role": "assistant",
+        "content": null,
+        "tool_calls": [
+          {
+            "id": "call_1",
+            "type": "function",
+            "function": {
+              "name": "get_weather",
+              "arguments": "{\"location\": \"San Francisco, CA\", \"unit\": \"fahrenheit\"}"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}
+```
+
+### Return Results
+
+Execute the function and return results:
+
+```json
+{
+  "model": "model.gguf",
+  "messages": [
+    {"role": "user", "content": "What's the weather in San Francisco?"},
+    {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "get_weather", "arguments": "{\"location\": \"San Francisco, CA\", \"unit\": \"fahrenheit\"}"}}]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_1",
+      "content": "{\"temperature\": 72, \"condition\": \"sunny\", \"humidity\": 65}"
+    }
+  ]
+}
+```
+
+The model will generate a natural language response using the tool results.
+
+## Parallel Tool Calling
+
+Some models support calling multiple functions simultaneously:
+
+```json
+{
+  "model": "model.gguf",
+  "messages": [{"role": "user", "content": "What's the weather in SF and NYC?"}],
+  "tools": [...],
+  "parallel_tool_calls": true
+}
+```
+
+<Warning>
+Parallel tool calling is disabled by default. Enable with `"parallel_tool_calls": true` in your request.
+</Warning>
+
+## Complete Examples
+
+<Tabs>
+  <Tab title="Python">
+    ```python
+    import requests
+    import json
+
+    # Define tools
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "calculate",
+                "description": "Perform basic arithmetic operations",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "operation": {
+                            "type": "string",
+                            "enum": ["add", "subtract", "multiply", "divide"]
+                        },
+                        "a": {"type": "number"},
+                        "b": {"type": "number"}
+                    },
+                    "required": ["operation", "a", "b"]
+                }
+            }
+        }
+    ]
+
+    # Initial request
+    response = requests.post(
+        "http://localhost:8080/v1/chat/completions",
+        json={
+            "model": "model.gguf",
+            "messages": [{"role": "user", "content": "What is 15 * 7?"}],
+            "tools": tools
+        }
+    )
+
+    result = response.json()
+    tool_calls = result["choices"][0]["message"]["tool_calls"]
+
+    # Execute tool
+    if tool_calls:
+        tool_call = tool_calls[0]
+        args = json.loads(tool_call["function"]["arguments"])
+        
+        # Calculate result
+        operations = {
+            "add": lambda a, b: a + b,
+            "multiply": lambda a, b: a * b,
+        }
+        result = operations[args["operation"]](args["a"], args["b"])
+        
+        # Return result to model
+        response = requests.post(
+            "http://localhost:8080/v1/chat/completions",
+            json={
+                "model": "model.gguf",
+                "messages": [
+                    {"role": "user", "content": "What is 15 * 7?"},
+                    result["choices"][0]["message"],
+                    {
+                        "role": "tool",
+                        "tool_call_id": tool_call["id"],
+                        "content": str(result)
+                    }
+                ]
+            }
+        )
+        
+        print(response.json()["choices"][0]["message"]["content"])
+    ```
+  </Tab>
+  <Tab title="JavaScript">
+    ```javascript
+    async function chat() {
+      const tools = [
+        {
+          type: "function",
+          function: {
+            name: "get_time",
+            description: "Get current time in a timezone",
+            parameters: {
+              type: "object",
+              properties: {
+                timezone: {
+                  type: "string",
+                  description: "IANA timezone name"
+                }
+              },
+              required: ["timezone"]
+            }
+          }
+        }
+      ];
+
+      // Initial request
+      let response = await fetch("http://localhost:8080/v1/chat/completions", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+          model: "model.gguf",
+          messages: [{role: "user", content: "What time is it in Tokyo?"}],
+          tools: tools
+        })
+      });
+
+      let data = await response.json();
+      const toolCalls = data.choices[0].message.tool_calls;
+
+      if (toolCalls) {
+        const toolCall = toolCalls[0];
+        const args = JSON.parse(toolCall.function.arguments);
+        
+        // Get current time
+        const time = new Date().toLocaleString("en-US", {
+          timeZone: args.timezone
+        });
+        
+        // Return result
+        response = await fetch("http://localhost:8080/v1/chat/completions", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({
+            model: "model.gguf",
+            messages: [
+              {role: "user", content: "What time is it in Tokyo?"},
+              data.choices[0].message,
+              {
+                role: "tool",
+                tool_call_id: toolCall.id,
+                content: time
+              }
+            ]
+          })
+        });
+        
+        data = await response.json();
+        console.log(data.choices[0].message.content);
+      }
+    }
+
+    chat();
+    ```
+  </Tab>
+  <Tab title="cURL">
+    ```bash
+    # Initial request
+    curl http://localhost:8080/v1/chat/completions \
+      -H "Content-Type: application/json" \
+      -d '{
+        "model": "model.gguf",
+        "messages": [
+          {"role": "user", "content": "Search for llama.cpp on GitHub"}
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "search_github",
+              "description": "Search GitHub repositories",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "query": {"type": "string"}
+                },
+                "required": ["query"]
+              }
+            }
+          }
+        ]
+      }'
+
+    # Model responds with tool_call requesting search_github
+
+    # Return results
+    curl http://localhost:8080/v1/chat/completions \
+      -H "Content-Type: application/json" \
+      -d '{
+        "model": "model.gguf",
+        "messages": [
+          {"role": "user", "content": "Search for llama.cpp on GitHub"},
+          {
+            "role": "assistant",
+            "tool_calls": [{
+              "id": "call_1",
+              "type": "function",
+              "function": {
+                "name": "search_github",
+                "arguments": "{\"query\": \"llama.cpp\"}"
+              }
+            }]
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_1",
+            "content": "Found: ggml-org/llama.cpp - LLM inference in C/C++"
+          }
+        ]
+      }'
+    ```
+  </Tab>
+</Tabs>
+
+## Built-in Tools (Llama 3.x)
+
+Llama 3.1+ models support built-in tool names:
+
+- `wolfram_alpha` — Mathematical and factual queries
+- `brave_search` / `web_search` — Web searching
+- `code_interpreter` — Code execution
+
+These don't require parameter definitions but still need tool result handling.
+
+## Custom Chat Templates
+
+Override the default chat template for better function calling:
+
+```bash
+llama-server -m model.gguf \
+  --chat-template-file templates/functionary-v3.1.jinja
+```
+
+Or specify in the API request:
+
+```json
+{
+  "model": "model.gguf",
+  "messages": [...],
+  "tools": [...],
+  "chat_template": "path/to/template.jinja"
+}
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Function Descriptions">
+    - Write clear, concise descriptions
+    - Include parameter constraints and units
+    - Specify required vs optional parameters
+    - Use JSON Schema for parameter validation
+  </Accordion>
+  
+  <Accordion title="Error Handling">
+    - Return structured error messages in tool results
+    - Include error types and codes
+    - Handle rate limits and timeouts
+    - Provide fallback behavior
+  </Accordion>
+  
+  <Accordion title="Model Selection">
+    - Use models with native function calling support when possible
+    - Test generic support with your specific model
+    - Consider token efficiency for high-volume applications
+    - Benchmark accuracy with your tool definitions
+  </Accordion>
+</AccordionGroup>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Model not calling functions">
+    - Ensure `--jinja` flag is set on server
+    - Check tool descriptions are clear and specific
+    - Verify model supports function calling
+    - Try with `--chat-template-file` override
+  </Accordion>
+  
+  <Accordion title="Invalid arguments generated">
+    - Add parameter constraints to JSON Schema
+    - Include examples in descriptions
+    - Use enums for limited choices
+    - Validate and sanitize arguments before execution
+  </Accordion>
+  
+  <Accordion title="Generic format using too many tokens">
+    - Switch to a model with native support
+    - Simplify tool descriptions
+    - Reduce number of available tools
+    - Use custom chat template optimized for your model
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="REST API" icon="plug" href="/api/rest/chat-completions">
+    Learn about the chat completions endpoint
+  </Card>
+  <Card title="Server Configuration" icon="gear" href="/api/tools/llama-server">
+    Configure llama-server for function calling
+  </Card>
+</CardGroup>

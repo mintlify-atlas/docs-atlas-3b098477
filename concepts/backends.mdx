@@ -1,0 +1,447 @@
+---
+title: Compute Backends
+description: Hardware acceleration options for llama.cpp inference
+---
+
+# Compute Backends
+
+llama.cpp supports a wide variety of compute backends to accelerate inference across different hardware platforms. Each backend is optimized for specific hardware architectures.
+
+## Supported Backends
+
+| Backend | Target Devices | Documentation |
+|---------|----------------|---------------|
+| **Metal** | Apple Silicon (M1/M2/M3/M4) | [Build Guide](/development/building#metal-build) |
+| **CUDA** | NVIDIA GPUs | [Build Guide](/development/building#cuda) |
+| **HIP** | AMD GPUs | [Build Guide](/development/building#hip) |
+| **Vulkan** | Cross-platform GPUs | [Build Guide](/development/building#vulkan) |
+| **SYCL** | Intel GPUs & Nvidia GPUs | |
+| **CANN** | Ascend NPUs (Huawei) | |
+| **MUSA** | Moore Threads GPUs | [Build Guide](/development/building#musa) |
+| **OpenCL** | Adreno GPUs (Qualcomm) | |
+| **BLAS** | CPU acceleration (all platforms) | [Build Guide](/development/building#blas-build) |
+| **BLIS** | CPU acceleration (AMD optimized) | |
+| **ZenDNN** | AMD CPUs | |
+| **zDNN** | IBM Z & LinuxONE | |
+| **RPC** | Remote compute | [RPC Documentation](https://github.com/ggml-org/llama.cpp/tree/master/tools/rpc) |
+| **VirtGPU** | VirtGPU API | |
+| **Hexagon** | Snapdragon DSP | |
+| **WebGPU** | Browser/WASM | [Build Guide](/development/building#webgpu) (In Progress) |
+
+## Quick Selection Guide
+
+<CardGroup cols={2}>
+  <Card title="Apple Silicon Macs" icon="apple">
+    **Metal** (default)
+    
+    Automatically enabled on macOS. Uses GPU and Neural Engine for maximum performance.
+    
+    ```bash
+    # Disable if needed
+    cmake -B build -DGGML_METAL=OFF
+    ```
+  </Card>
+  
+  <Card title="NVIDIA GPUs" icon="microchip">
+    **CUDA**
+    
+    Best performance on NVIDIA GPUs. Requires CUDA toolkit.
+    
+    ```bash
+    cmake -B build -DGGML_CUDA=ON
+    cmake --build build --config Release
+    ```
+  </Card>
+  
+  <Card title="AMD GPUs" icon="microchip">
+    **HIP** (Linux) or **Vulkan** (cross-platform)
+    
+    HIP provides best performance on Linux. Vulkan works everywhere.
+    
+    ```bash
+    # HIP
+    cmake -B build -DGGML_HIP=ON
+    
+    # Vulkan
+    cmake -B build -DGGML_VULKAN=ON
+    ```
+  </Card>
+  
+  <Card title="Intel GPUs" icon="microchip">
+    **SYCL**
+    
+    Optimized for Intel Data Center Max, Flex, Arc, and integrated GPUs.
+    
+    ```bash
+    cmake -B build -DGGML_SYCL=ON
+    cmake --build build --config Release
+    ```
+  </Card>
+  
+  <Card title="CPU Only" icon="server">
+    **BLAS** or **AVX2/AVX512**
+    
+    Use OpenBLAS, Intel MKL, or native CPU features.
+    
+    ```bash
+    # OpenBLAS
+    cmake -B build -DGGML_BLAS=ON
+    
+    # Native optimizations (auto-detected)
+    cmake -B build
+    ```
+  </Card>
+  
+  <Card title="Mobile/Embedded" icon="mobile">
+    **OpenCL** (Qualcomm) or **Hexagon** (Snapdragon DSP)
+    
+    Optimized for mobile SoCs and embedded devices.
+  </Card>
+</CardGroup>
+
+## Backend Details
+
+### Metal (Apple Silicon)
+
+<Info>
+**Default backend on macOS** - automatically enabled during build.
+</Info>
+
+**Features:**
+- Native GPU acceleration on M1/M2/M3/M4 chips
+- Utilizes Apple Neural Engine when available
+- Optimized via ARM NEON and Accelerate framework
+- Zero configuration required
+
+**When to use:**
+- Any Mac with Apple Silicon
+- Provides best performance on macOS
+
+**Disable Metal:**
+```bash
+cmake -B build -DGGML_METAL=OFF
+llama-cli -m model.gguf --n-gpu-layers 0  # Runtime disable
+```
+
+### CUDA (NVIDIA GPUs)
+
+**Features:**
+- Custom CUDA kernels optimized for LLM inference
+- Supports all NVIDIA GPUs with compute capability ≥ 3.5
+- Multi-GPU support with layer splitting
+- Hybrid CPU+GPU inference for models larger than VRAM
+
+**Requirements:**
+- NVIDIA GPU with CUDA support
+- [CUDA Toolkit](https://developer.nvidia.com/cuda-toolkit) installed
+
+**Build:**
+```bash
+cmake -B build -DGGML_CUDA=ON
+cmake --build build --config Release
+```
+
+**Usage:**
+```bash
+# Offload all layers to GPU
+llama-cli -m model.gguf -ngl 99
+
+# Offload 32 layers to GPU
+llama-cli -m model.gguf -ngl 32
+
+# Use specific GPU
+llama-cli -m model.gguf -ngl 99 --main-gpu 0
+
+# Split across multiple GPUs
+llama-cli -m model.gguf -ngl 99 --tensor-split 3,1
+```
+
+<Note>
+The `-ngl` (n-gpu-layers) parameter controls how many transformer layers run on GPU. Use `-ngl 99` or `-ngl -1` to offload all layers.
+</Note>
+
+### HIP (AMD GPUs)
+
+**Features:**
+- AMD GPU acceleration using HIP runtime
+- Similar performance to CUDA on AMD hardware
+- Supports Radeon RX and Instinct series
+
+**Requirements:**
+- AMD GPU with ROCm support
+- [ROCm](https://rocm.docs.amd.com/) installed (Linux only)
+
+**Build:**
+```bash
+cmake -B build -DGGML_HIP=ON
+cmake --build build --config Release
+```
+
+**When to use:**
+- AMD GPUs on Linux
+- Best performance for AMD hardware
+
+### Vulkan (Cross-platform GPU)
+
+**Features:**
+- Cross-platform GPU acceleration
+- Works on NVIDIA, AMD, Intel, and mobile GPUs
+- Supported on Windows, Linux, macOS, and Android
+- Good fallback when native backends aren't available
+
+**Build:**
+```bash
+cmake -B build -DGGML_VULKAN=ON
+cmake --build build --config Release
+```
+
+**When to use:**
+- AMD GPUs on Windows
+- Multi-vendor GPU systems
+- When CUDA/Metal/HIP aren't available
+- Android devices
+
+### SYCL (Intel & NVIDIA GPUs)
+
+**Features:**
+- Unified programming model for heterogeneous computing
+- Optimized for Intel Data Center Max, Flex, and Arc GPUs
+- Also supports NVIDIA GPUs
+- CPU+GPU hybrid inference
+
+**Supported Hardware:**
+- Intel Data Center GPU Max Series
+- Intel Data Center GPU Flex Series  
+- Intel Arc Graphics (A-Series)
+- Intel integrated GPUs
+- NVIDIA GPUs (via CUDA backend)
+
+**Build:**
+```bash
+# Intel GPUs
+source /opt/intel/oneapi/setvars.sh
+cmake -B build -DGGML_SYCL=ON
+cmake --build build --config Release
+
+# NVIDIA GPUs via SYCL
+cmake -B build -DGGML_SYCL=ON -DGGML_SYCL_TARGET=NVIDIA
+cmake --build build --config Release
+```
+
+See the for detailed setup instructions.
+
+### BLAS (CPU Acceleration)
+
+**Features:**
+- Accelerates matrix operations on CPU
+- Improves prompt processing with large batch sizes
+- Multiple implementations available
+
+**Implementations:**
+
+<Accordion title="OpenBLAS (Recommended for most users)">
+```bash
+# Install OpenBLAS
+sudo apt-get install libopenblas-dev  # Debian/Ubuntu
+sudo dnf install openblas-devel       # Fedora/RHEL
+
+# Build
+cmake -B build -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=OpenBLAS
+cmake --build build --config Release
+```
+</Accordion>
+
+<Accordion title="Intel oneMKL (Best for Intel CPUs)">
+```bash
+# Source Intel environment
+source /opt/intel/oneapi/setvars.sh
+
+# Build
+cmake -B build -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=Intel10_64lp \
+      -DCMAKE_C_COMPILER=icx -DCMAKE_CXX_COMPILER=icpx
+cmake --build build --config Release
+```
+
+Enables AVX-VNNI instructions on Intel CPUs without AVX-512.
+</Accordion>
+
+<Accordion title="Apple Accelerate (macOS default)">
+Automatically enabled on macOS. Provides BLAS using Apple's Accelerate framework.
+</Accordion>
+
+<Note>
+BLAS acceleration primarily improves **prompt processing** speed. It has minimal effect on token generation speed.
+</Note>
+
+### CPU Native Optimizations
+
+Even without BLAS, llama.cpp includes extensive CPU optimizations:
+
+**x86_64 CPUs:**
+- AVX, AVX2, AVX512 support (auto-detected)
+- AMX (Advanced Matrix Extensions) for Intel Sapphire Rapids
+- FMA (Fused Multiply-Add)
+
+**ARM CPUs:**
+- NEON SIMD instructions
+- SVE (Scalable Vector Extension)
+- ARM v8.2+ fp16 support
+
+**RISC-V CPUs:**
+- RVV (RISC-V Vector Extension)
+- ZVFH, ZFH (half-precision floating point)
+- ZICBOP (cache block operations)
+- ZIHINTPAUSE (pause hint)
+
+**Build with native optimizations:**
+```bash
+cmake -B build -DGGML_NATIVE=ON
+cmake --build build --config Release
+```
+
+## Hybrid CPU+GPU Inference
+
+For models larger than your GPU VRAM:
+
+```bash
+# Split model across GPU and CPU
+# Model has 80 layers, GPU has VRAM for 60
+llama-cli -m model.gguf -ngl 60
+
+# 60 layers on GPU, 20 layers on CPU
+# Automatically manages data transfer
+```
+
+<Info>
+llama.cpp seamlessly handles models that don't fit entirely in VRAM by offloading remaining layers to system RAM.
+</Info>
+
+## Multi-GPU Configuration
+
+### Layer Split Mode
+
+Distribute model layers across multiple GPUs:
+
+```bash
+# Split evenly across all GPUs
+llama-cli -m model.gguf -ngl 99
+
+# Use GPU 1 as primary
+llama-cli -m model.gguf -ngl 99 --main-gpu 1
+
+# Custom split ratio (GPU 0 gets 3x more than GPU 1)
+llama-cli -m model.gguf -ngl 99 --tensor-split 3,1
+```
+
+### Tensor Parallel Mode
+
+Split individual layers across GPUs (when supported):
+
+```bash
+llama-cli -m model.gguf -ngl 99 --split-mode row
+```
+
+<Warning>
+Tensor parallelism requires backend support and may not be available for all model architectures.
+</Warning>
+
+## Choosing the Right Backend
+
+### For Maximum Performance
+
+1. **Apple Silicon**: Metal (default)
+2. **NVIDIA GPU**: CUDA
+3. **AMD GPU Linux**: HIP  
+4. **AMD GPU Windows**: Vulkan
+5. **Intel GPU**: SYCL
+6. **CPU only**: BLAS (OpenBLAS or Intel MKL)
+
+### For Maximum Compatibility
+
+1. **Cross-platform GPU**: Vulkan
+2. **CPU**: Built-in optimizations (AVX2/AVX512/NEON)
+
+### For Mobile/Embedded
+
+1. **Qualcomm Snapdragon**: OpenCL or Hexagon DSP
+2. **Android**: Vulkan
+3. **ARM devices**: NEON optimizations (automatic)
+
+## Performance Tips
+
+<CardGroup cols={2}>
+  <Card title="Quantization" icon="compress">
+    Use Q4_K_M or Q5_K_M quantization to fit larger models in GPU VRAM.
+    
+    See [Quantization Guide](/concepts/quantization)
+  </Card>
+  
+  <Card title="Batch Size" icon="layer-group">
+    Larger batch sizes better utilize GPU parallelism.
+    
+    ```bash
+    llama-cli -m model.gguf -ngl 99 -b 512
+    ```
+  </Card>
+  
+  <Card title="Flash Attention" icon="bolt">
+    Enable flash attention for faster inference (GPU only).
+    
+    ```bash
+    llama-cli -m model.gguf -fa
+    ```
+  </Card>
+  
+  <Card title="Context Size" icon="memory">
+    Reduce context size if running out of VRAM.
+    
+    ```bash
+    llama-cli -m model.gguf -c 2048
+    ```
+  </Card>
+</CardGroup>
+
+## Troubleshooting
+
+<Accordion title="Out of Memory Errors">
+1. Reduce `-ngl` to offload fewer layers
+2. Use more aggressive quantization (Q3_K_M or Q4_K_M)
+3. Reduce context size with `-c`
+4. Enable memory mapping with `--mmap`
+</Accordion>
+
+<Accordion title="Slow Performance">
+1. Verify GPU is actually being used (check `nvidia-smi` or Activity Monitor)
+2. Increase `-ngl` to offload more layers to GPU
+3. Increase batch size with `-b`
+4. Check that GPU drivers are up to date
+5. Use `llama-bench` to measure performance
+</Accordion>
+
+<Accordion title="Build Failures">
+1. Ensure SDK/toolkit is properly installed (CUDA Toolkit, ROCm, etc.)
+2. Check environment variables (CUDA_PATH, ROCM_PATH)
+3. Update CMake to latest version
+4. See backend-specific documentation for detailed setup
+</Accordion>
+
+## Benchmarking
+
+Measure performance on your hardware:
+
+```bash
+# Benchmark model
+llama-bench -m model.gguf
+
+# Output:
+# | model         | size    | params | backend    | ngl | test  | t/s      |
+# | ------------- | ------- | ------ | ---------- | --- | ----- | -------- |
+# | llama 7B Q4_0 | 3.56 GB | 6.74 B | CUDA       | 99  | pp512 | 1234.56  |
+# | llama 7B Q4_0 | 3.56 GB | 6.74 B | CUDA       | 99  | tg128 | 45.67    |
+```
+
+## Further Reading
+
+- [Build Documentation](/development/building)
+- [Backend-Specific Guides](/backends)
+- [Performance Optimization](/advanced/performance-tuning)

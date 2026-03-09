@@ -1,0 +1,335 @@
+---
+title: 'llama-cli'
+description: 'Command-line interface for interacting with LLM models'
+---
+
+## Overview
+
+`llama-cli` is an interactive CLI tool for accessing and experimenting with most of llama.cpp's functionality. It provides a straightforward way to run text generation, chat conversations, and test model parameters from the command line.
+
+## Basic Usage
+
+<CodeGroup>
+```bash Run with local model
+llama-cli -m my_model.gguf
+```
+
+```bash Download from Hugging Face
+llama-cli -hf ggml-org/gemma-3-1b-it-GGUF
+```
+
+```bash Run in conversation mode
+llama-cli -m model.gguf -cnv
+```
+</CodeGroup>
+
+## Key Features
+
+- **Conversation Mode**: Automatically activates for models with built-in chat templates
+- **Custom Grammars**: Constrain output with BNF-like grammar rules
+- **Speculative Decoding**: Use draft models to accelerate generation
+- **Multimodal Support**: Process images and audio with compatible models
+- **Context Management**: Automatic context shifting for infinite text generation
+
+## Common Parameters
+
+### Model Loading
+
+<ParamField path="-m, --model" type="string">
+  Path to the GGUF model file to load.
+  
+  Can also be set via `LLAMA_ARG_MODEL` environment variable.
+</ParamField>
+
+<ParamField path="-hf, --hf-repo" type="string">
+  Hugging Face model repository in format `<user>/<model>[:quant]`.
+  
+  Quant is optional and defaults to Q4_K_M. Automatically downloads mmproj if available.
+  
+  Example: `unsloth/phi-4-GGUF:q4_k_m`
+</ParamField>
+
+<ParamField path="--hf-file" type="string">
+  Specific file from Hugging Face to use, overrides the quant in `--hf-repo`.
+</ParamField>
+
+### Generation Settings
+
+<ParamField path="-p, --prompt" type="string">
+  Prompt text to start generation with. For system messages, use `-sys` instead.
+</ParamField>
+
+<ParamField path="-f, --file" type="string">
+  Path to a file containing the prompt to use.
+</ParamField>
+
+<ParamField path="-n, --predict" type="integer" default="-1">
+  Number of tokens to predict. `-1` means infinity.
+  
+  Can be set via `LLAMA_ARG_N_PREDICT` environment variable.
+</ParamField>
+
+<ParamField path="-c, --ctx-size" type="integer" default="0">
+  Size of the prompt context. `0` means loaded from model.
+  
+  Can be set via `LLAMA_ARG_CTX_SIZE` environment variable.
+</ParamField>
+
+### Conversation Mode
+
+<ParamField path="-cnv, --conversation" type="boolean" default="auto">
+  Run in conversation mode. Auto-enabled if chat template is available.
+  
+  In this mode:
+  - Special tokens and suffix/prefix are not printed
+  - Interactive mode is enabled
+</ParamField>
+
+<ParamField path="--chat-template" type="string">
+  Set custom jinja chat template. Built-in templates include:
+  
+  `llama3`, `llama2`, `chatml`, `mistral-v3`, `phi3`, `phi4`, `gemma`, `deepseek`, `deepseek2`, `deepseek3`, and many more.
+</ParamField>
+
+<ParamField path="-sys, --system-prompt" type="string">
+  System prompt to use with model (if supported by chat template).
+</ParamField>
+
+### Sampling Parameters
+
+<ParamField path="--temp, --temperature" type="float" default="0.8">
+  Sampling temperature. Higher values increase randomness.
+</ParamField>
+
+<ParamField path="--top-k" type="integer" default="40">
+  Top-k sampling. `0` disables it.
+  
+  Can be set via `LLAMA_ARG_TOP_K` environment variable.
+</ParamField>
+
+<ParamField path="--top-p" type="float" default="0.95">
+  Top-p (nucleus) sampling. `1.0` disables it.
+</ParamField>
+
+<ParamField path="--min-p" type="float" default="0.05">
+  Min-p sampling. `0.0` disables it.
+</ParamField>
+
+<ParamField path="--repeat-penalty" type="float" default="1.0">
+  Penalize repeat sequences of tokens. `1.0` means disabled.
+</ParamField>
+
+<ParamField path="-s, --seed" type="integer" default="-1">
+  RNG seed for reproducible generation. `-1` uses random seed.
+</ParamField>
+
+### Performance & Hardware
+
+<ParamField path="-t, --threads" type="integer" default="auto">
+  Number of CPU threads to use during generation.
+  
+  Can be set via `LLAMA_ARG_THREADS` environment variable.
+</ParamField>
+
+<ParamField path="-ngl, --n-gpu-layers" type="string" default="auto">
+  Number of layers to offload to GPU. Can be a number, `'auto'`, or `'all'`.
+  
+  Can be set via `LLAMA_ARG_N_GPU_LAYERS` environment variable.
+</ParamField>
+
+<ParamField path="-b, --batch-size" type="integer" default="2048">
+  Logical maximum batch size.
+  
+  Can be set via `LLAMA_ARG_BATCH` environment variable.
+</ParamField>
+
+<ParamField path="-fa, --flash-attn" type="string" default="auto">
+  Flash Attention setting: `'on'`, `'off'`, or `'auto'`.
+  
+  Can be set via `LLAMA_ARG_FLASH_ATTN` environment variable.
+</ParamField>
+
+## Usage Examples
+
+### Interactive Conversation
+
+<Steps>
+  <Step title="Start conversation mode">
+    Models with built-in chat templates automatically activate conversation mode:
+    
+    ```bash
+    llama-cli -m model.gguf
+    
+    # > hi, who are you?
+    # Hi there! I'm your helpful assistant! ...
+    #
+    # > what is 1+1?
+    # Easy peasy! The answer to 1+1 is... 2!
+    ```
+  </Step>
+  
+  <Step title="Custom chat template">
+    Use a specific template or define custom prefixes:
+    
+    ```bash
+    # Use built-in template
+    llama-cli -m model.gguf -cnv --chat-template chatml
+    
+    # Custom prefix
+    llama-cli -m model.gguf -cnv --in-prefix 'User: ' --reverse-prompt 'User:'
+    ```
+  </Step>
+</Steps>
+
+### Constrained Generation with Grammar
+
+Constrain output to follow specific formats using GBNF grammars:
+
+```bash
+llama-cli -m model.gguf -n 256 \
+  --grammar-file grammars/json.gbnf \
+  -p 'Request: schedule a call at 8pm; Command:'
+
+# Output: {"appointmentTime": "8pm", "appointmentDetails": "schedule a a call"}
+```
+
+The `grammars/` folder contains sample grammars. You can also use JSON schemas:
+
+```bash
+llama-cli -m model.gguf \
+  -j '{"type": "object", "properties": {"name": {"type": "string"}}}' \
+  -p 'Generate a person:'
+```
+
+### Speculative Decoding
+
+Accelerate generation with a draft model:
+
+<CodeGroup>
+```bash Basic speculative decoding
+llama-cli -m model.gguf -md draft.gguf
+```
+
+```bash Configure draft settings
+llama-cli -m model.gguf -md draft.gguf \
+  --draft-n 16 \
+  --draft-p-min 0.75
+```
+</CodeGroup>
+
+<Note>
+  The draft model should be a smaller, faster variant of the target model for best results.
+</Note>
+
+### Multimodal Usage
+
+Process images or audio with vision/audio models:
+
+```bash
+llama-cli -m vision-model.gguf \
+  -mm vision-projector.gguf \
+  --image path/to/image.jpg \
+  -p "Describe this image:"
+```
+
+### Single-Turn Generation
+
+Generate a single response without interactive mode:
+
+```bash
+llama-cli -m model.gguf \
+  -p "Write a haiku about coding:" \
+  -n 50 \
+  --single-turn
+```
+
+## Advanced Features
+
+### Context Management
+
+<ParamField path="--context-shift" type="boolean" default="false">
+  Enable context shift for infinite text generation. When the context is full, old tokens are shifted out.
+</ParamField>
+
+<ParamField path="--keep" type="integer" default="0">
+  Number of tokens to keep from initial prompt when context fills up.
+  
+  Use `-1` to keep all tokens.
+</ParamField>
+
+<ParamField path="--ctx-checkpoints" type="integer" default="8">
+  Maximum number of context checkpoints to create per slot for state-based context (SWA).
+</ParamField>
+
+### LoRA Adapters
+
+Load LoRA adapters to modify model behavior:
+
+```bash
+# Single adapter
+llama-cli -m model.gguf --lora adapter.gguf
+
+# Multiple adapters with scaling
+llama-cli -m model.gguf \
+  --lora-scaled adapter1.gguf:0.5,adapter2.gguf:1.0
+```
+
+### Control Vectors
+
+Apply control vectors to steer model behavior:
+
+```bash
+llama-cli -m model.gguf \
+  --control-vector-scaled happiness.gguf:0.8 \
+  --control-vector-layer-range 10 30
+```
+
+## Output and Logging
+
+<ParamField path="-v, --verbose" type="boolean">
+  Enable verbose logging (log all messages).
+</ParamField>
+
+<ParamField path="--log-file" type="string">
+  Path to write log output to a file.
+  
+  Can be set via `LLAMA_LOG_FILE` environment variable.
+</ParamField>
+
+<ParamField path="--no-display-prompt" type="boolean">
+  Don't print the prompt at generation time.
+</ParamField>
+
+<ParamField path="--show-timings" type="boolean" default="true">
+  Show timing information after each response.
+  
+  Can be set via `LLAMA_ARG_SHOW_TIMINGS` environment variable.
+</ParamField>
+
+## Environment Variables
+
+Many parameters can be set via environment variables:
+
+```bash
+export LLAMA_ARG_MODEL=/path/to/model.gguf
+export LLAMA_ARG_CTX_SIZE=4096
+export LLAMA_ARG_N_GPU_LAYERS=35
+export LLAMA_ARG_THREADS=8
+
+llama-cli -p "Hello world"
+```
+
+## Performance Tips
+
+<Note>
+  - Use `--flash-attn on` for faster attention computation on supported hardware
+  - Increase `--batch-size` for better throughput with longer prompts
+  - Enable `--mlock` to prevent model from being swapped out of RAM
+  - Use quantized models (Q4_K_M, Q5_K_M) for faster inference with minimal quality loss
+</Note>
+
+## See Also
+
+- [llama-server](/api/tools/llama-server) - HTTP server for serving LLMs
+- [llama-bench](/api/tools/llama-bench) - Performance benchmarking tool
+- [llama-perplexity](/api/tools/llama-perplexity) - Model evaluation tool

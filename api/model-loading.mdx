@@ -1,0 +1,438 @@
+---
+title: 'Model Loading'
+description: 'Loading GGUF models and configuring model parameters'
+---
+
+## Loading a Model
+
+The primary function for loading models is `llama_model_load_from_file`:
+
+```c
+LLAMA_API struct llama_model * llama_model_load_from_file(
+    const char * path_model,
+    struct llama_model_params params
+);
+```
+
+<ParamField path="path_model" type="const char *">
+  Path to the GGUF model file. For split models, use the naming pattern: `<name>-%05d-of-%05d.gguf`
+</ParamField>
+
+<ParamField path="params" type="struct llama_model_params">
+  Model loading parameters (see below)
+</ParamField>
+
+<ResponseField name="return" type="llama_model *">
+  Returns pointer to loaded model, or `NULL` on failure
+</ResponseField>
+
+### Example
+
+```c
+llama_model_params params = llama_model_default_params();
+params.n_gpu_layers = 32;  // Offload 32 layers to GPU
+params.use_mmap = true;
+
+llama_model * model = llama_model_load_from_file("model.gguf", params);
+if (model == NULL) {
+    fprintf(stderr, "Failed to load model\n");
+    return 1;
+}
+```
+
+## Model Parameters
+
+### Structure Definition
+
+```c
+struct llama_model_params {
+    // NULL-terminated list of devices for offloading
+    ggml_backend_dev_t * devices;
+    
+    // Buffer type overrides for tensors matching a pattern
+    const struct llama_model_tensor_buft_override * tensor_buft_overrides;
+    
+    // Number of layers to store in VRAM (-1 = all layers)
+    int32_t n_gpu_layers;
+    
+    // How to split the model across multiple GPUs
+    enum llama_split_mode split_mode;
+    
+    // GPU used for entire model when split_mode is LLAMA_SPLIT_MODE_NONE
+    int32_t main_gpu;
+    
+    // Proportion of model to offload to each GPU
+    const float * tensor_split;
+    
+    // Progress callback (return false to abort loading)
+    llama_progress_callback progress_callback;
+    void * progress_callback_user_data;
+    
+    // Override model metadata key-value pairs
+    const struct llama_model_kv_override * kv_overrides;
+    
+    // Boolean flags
+    bool vocab_only;       // Only load vocabulary, no weights
+    bool use_mmap;         // Use mmap if possible
+    bool use_direct_io;    // Use direct I/O (overrides use_mmap)
+    bool use_mlock;        // Force system to keep model in RAM
+    bool check_tensors;    // Validate model tensor data
+    bool use_extra_bufts;  // Use extra buffer types for weight repacking
+    bool no_host;          // Bypass host buffer
+    bool no_alloc;         // Only load metadata, simulate allocations
+};
+```
+
+### Parameter Details
+
+<ParamField path="n_gpu_layers" type="int32_t" default="0">
+  Number of model layers to offload to GPU. Use `-1` to offload all layers. Set to `0` for CPU-only inference.
+  
+  ```c
+  params.n_gpu_layers = 32;  // Offload 32 layers
+  params.n_gpu_layers = -1;  // Offload all layers
+  params.n_gpu_layers = 0;   // CPU only
+  ```
+</ParamField>
+
+<ParamField path="split_mode" type="enum llama_split_mode" default="LLAMA_SPLIT_MODE_LAYER">
+  How to distribute the model across multiple GPUs:
+  
+  - `LLAMA_SPLIT_MODE_NONE`: Single GPU
+  - `LLAMA_SPLIT_MODE_LAYER`: Split layers and KV cache across GPUs
+  - `LLAMA_SPLIT_MODE_ROW`: Split layers and KV cache, use tensor parallelism if supported
+  
+  ```c
+  params.split_mode = LLAMA_SPLIT_MODE_LAYER;
+  ```
+</ParamField>
+
+<ParamField path="main_gpu" type="int32_t" default="0">
+  The GPU device ID to use when `split_mode` is `LLAMA_SPLIT_MODE_NONE`.
+  
+  ```c
+  params.main_gpu = 0;  // Use first GPU
+  ```
+</ParamField>
+
+<ParamField path="vocab_only" type="bool" default="false">
+  Load only the vocabulary without model weights. Useful for tokenization-only applications.
+  
+  ```c
+  params.vocab_only = true;
+  ```
+</ParamField>
+
+<ParamField path="use_mmap" type="bool" default="true">
+  Use memory mapping to load the model. This can improve loading speed and reduce memory usage.
+  
+  ```c
+  params.use_mmap = true;
+  ```
+</ParamField>
+
+<ParamField path="use_mlock" type="bool" default="false">
+  Force the system to keep the model in RAM, preventing swapping to disk. Requires sufficient RAM.
+  
+  ```c
+  params.use_mlock = true;
+  ```
+</ParamField>
+
+<ParamField path="check_tensors" type="bool" default="false">
+  Validate model tensor data during loading. Useful for debugging corrupted models.
+  
+  ```c
+  params.check_tensors = true;
+  ```
+</ParamField>
+
+## Loading Split Models
+
+For models split across multiple files with custom naming:
+
+```c
+LLAMA_API struct llama_model * llama_model_load_from_splits(
+    const char ** paths,
+    size_t n_paths,
+    struct llama_model_params params
+);
+```
+
+<ParamField path="paths" type="const char **">
+  Array of file paths in the correct order
+</ParamField>
+
+<ParamField path="n_paths" type="size_t">
+  Number of split files
+</ParamField>
+
+### Example
+
+```c
+const char * paths[] = {
+    "model-part1.gguf",
+    "model-part2.gguf",
+    "model-part3.gguf"
+};
+
+llama_model_params params = llama_model_default_params();
+llama_model * model = llama_model_load_from_splits(paths, 3, params);
+```
+
+## Progress Callback
+
+Monitor model loading progress:
+
+```c
+typedef bool (*llama_progress_callback)(float progress, void * user_data);
+```
+
+<ParamField path="progress" type="float">
+  Loading progress from 0.0 to 1.0
+</ParamField>
+
+<ParamField path="user_data" type="void *">
+  User-provided context pointer
+</ParamField>
+
+<ResponseField name="return" type="bool">
+  Return `true` to continue loading, `false` to abort
+</ResponseField>
+
+### Example
+
+```c
+bool progress_callback(float progress, void * user_data) {
+    printf("Loading: %.1f%%\r", progress * 100.0f);
+    fflush(stdout);
+    return true;  // Continue loading
+}
+
+llama_model_params params = llama_model_default_params();
+params.progress_callback = progress_callback;
+params.progress_callback_user_data = NULL;
+
+llama_model * model = llama_model_load_from_file("model.gguf", params);
+```
+
+## Model Metadata
+
+Access model metadata from GGUF files:
+
+```c
+// Get metadata value by key
+int32_t llama_model_meta_val_str(
+    const struct llama_model * model,
+    const char * key,
+    char * buf,
+    size_t buf_size
+);
+
+// Get number of metadata key/value pairs
+int32_t llama_model_meta_count(const struct llama_model * model);
+
+// Get metadata key by index
+int32_t llama_model_meta_key_by_index(
+    const struct llama_model * model,
+    int32_t i,
+    char * buf,
+    size_t buf_size
+);
+
+// Get model description
+int32_t llama_model_desc(
+    const struct llama_model * model,
+    char * buf,
+    size_t buf_size
+);
+```
+
+### Example
+
+```c
+char buf[256];
+
+// Get model description
+if (llama_model_desc(model, buf, sizeof(buf)) > 0) {
+    printf("Model: %s\n", buf);
+}
+
+// Iterate metadata
+int32_t n_meta = llama_model_meta_count(model);
+for (int32_t i = 0; i < n_meta; i++) {
+    char key[128], value[256];
+    llama_model_meta_key_by_index(model, i, key, sizeof(key));
+    llama_model_meta_val_str_by_index(model, i, value, sizeof(value));
+    printf("%s = %s\n", key, value);
+}
+```
+
+## Model Properties
+
+Query model architecture and capabilities:
+
+<CodeGroup>
+```c Architecture
+int32_t n_layers = llama_model_n_layer(model);
+int32_t n_embd = llama_model_n_embd(model);
+int32_t n_head = llama_model_n_head(model);
+int32_t n_ctx_train = llama_model_n_ctx_train(model);
+uint64_t n_params = llama_model_n_params(model);
+uint64_t size_bytes = llama_model_size(model);
+
+printf("Layers: %d\n", n_layers);
+printf("Embedding dim: %d\n", n_embd);
+printf("Parameters: %llu\n", n_params);
+printf("Size: %.2f GB\n", size_bytes / 1024.0 / 1024.0 / 1024.0);
+```
+
+```c Capabilities
+bool has_encoder = llama_model_has_encoder(model);
+bool has_decoder = llama_model_has_decoder(model);
+bool is_recurrent = llama_model_is_recurrent(model);
+bool is_hybrid = llama_model_is_hybrid(model);
+
+if (has_encoder && has_decoder) {
+    printf("Encoder-decoder model\n");
+    llama_token start_token = llama_model_decoder_start_token(model);
+}
+
+if (is_recurrent) {
+    printf("Recurrent model (e.g., Mamba, RWKV)\n");
+}
+```
+
+```c RoPE Configuration
+enum llama_rope_type rope_type = llama_model_rope_type(model);
+float rope_freq_scale = llama_model_rope_freq_scale_train(model);
+
+printf("RoPE type: %d\n", rope_type);
+printf("RoPE frequency scale: %.4f\n", rope_freq_scale);
+```
+</CodeGroup>
+
+## Freeing Models
+
+Free model memory when done:
+
+```c
+void llama_model_free(struct llama_model * model);
+```
+
+<Note>
+Always free models before calling `llama_backend_free()`. All contexts created from the model must be freed before freeing the model.
+</Note>
+
+### Example
+
+```c
+// Correct order:
+llama_free(ctx);           // Free context first
+llama_model_free(model);   // Then free model
+llama_backend_free();      // Finally free backend
+```
+
+## Saving Models
+
+Save a loaded model back to a file:
+
+```c
+void llama_model_save_to_file(
+    const struct llama_model * model,
+    const char * path_model
+);
+```
+
+## Fitting Parameters to Memory
+
+Automatically adjust parameters to fit available device memory:
+
+```c
+enum llama_params_fit_status llama_params_fit(
+    const char * path_model,
+    struct llama_model_params * mparams,
+    struct llama_context_params * cparams,
+    float * tensor_split,
+    struct llama_model_tensor_buft_override * tensor_buft_overrides,
+    size_t * margins,
+    uint32_t n_ctx_min,
+    enum ggml_log_level log_level
+);
+```
+
+<ResponseField name="return" type="enum llama_params_fit_status">
+  - `LLAMA_PARAMS_FIT_STATUS_SUCCESS`: Parameters adjusted successfully
+  - `LLAMA_PARAMS_FIT_STATUS_FAILURE`: Could not find fitting allocations
+  - `LLAMA_PARAMS_FIT_STATUS_ERROR`: Hard error (e.g., model not found)
+</ResponseField>
+
+<Note>
+This function modifies the global logger state and is **not thread-safe**. Only parameters matching defaults are modified, except context size which is modified if equal to 0.
+</Note>
+
+## Complete Example
+
+<CodeGroup>
+```c model-loading.c
+#include "llama.h"
+#include <stdio.h>
+
+int main() {
+    // Initialize backend
+    llama_backend_init();
+    
+    // Configure model parameters
+    llama_model_params params = llama_model_default_params();
+    params.n_gpu_layers = 32;
+    params.use_mmap = true;
+    params.use_mlock = false;
+    params.check_tensors = true;
+    
+    // Load model
+    const char * model_path = "models/llama-2-7b.Q4_K_M.gguf";
+    llama_model * model = llama_model_load_from_file(model_path, params);
+    
+    if (model == NULL) {
+        fprintf(stderr, "Failed to load model from %s\n", model_path);
+        llama_backend_free();
+        return 1;
+    }
+    
+    // Print model information
+    printf("Model loaded successfully\n");
+    printf("  Layers: %d\n", llama_model_n_layer(model));
+    printf("  Embedding dimension: %d\n", llama_model_n_embd(model));
+    printf("  Context size (training): %d\n", llama_model_n_ctx_train(model));
+    printf("  Parameters: %llu\n", llama_model_n_params(model));
+    printf("  Size: %.2f GB\n", 
+           llama_model_size(model) / 1024.0 / 1024.0 / 1024.0);
+    
+    // Check capabilities
+    if (llama_model_is_recurrent(model)) {
+        printf("  Type: Recurrent\n");
+    } else if (llama_model_has_encoder(model)) {
+        printf("  Type: Encoder-decoder\n");
+    } else {
+        printf("  Type: Decoder-only\n");
+    }
+    
+    // Cleanup
+    llama_model_free(model);
+    llama_backend_free();
+    
+    return 0;
+}
+```
+</CodeGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Inference" icon="microchip" href="/api/inference">
+    Learn how to create contexts and run inference
+  </Card>
+  <Card title="Sampling" icon="dice" href="/api/sampling">
+    Configure token sampling strategies
+  </Card>
+</CardGroup>

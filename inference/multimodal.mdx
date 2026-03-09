@@ -1,0 +1,578 @@
+---
+title: Multimodal Models
+description: Vision and audio support in llama.cpp for multimodal AI applications
+---
+
+llama.cpp supports multimodal models that can process images and audio alongside text through the `libmtmd` library. This enables vision-language models (VLMs) and speech-language models for diverse AI applications.
+
+## Overview
+
+Multimodal support allows models to:
+
+- **Vision**: Analyze images, answer questions about visual content, generate image descriptions
+- **Audio**: Process speech, transcribe audio, understand audio content
+- **Mixed**: Handle multiple modalities simultaneously (e.g., Qwen2.5-Omni)
+
+Currently supported modalities:
+- **Images**: Vision models like Gemma 3, SmolVLM, Qwen2-VL, Pixtral
+- **Audio**: Speech models like Ultravox, Voxtral (experimental, may have reduced quality)
+
+## Quick Start
+
+<Steps>
+  <Step title="Download a multimodal model">
+    Use the `-hf` flag to automatically download a model with its projector:
+    ```bash
+    ./llama-server -hf ggml-org/gemma-3-4b-it-GGUF
+    ```
+  </Step>
+  
+  <Step title="Send a multimodal request">
+    Use the chat completions endpoint with image content:
+    ```bash
+    curl http://localhost:8080/v1/chat/completions \
+      -H "Content-Type: application/json" \
+      -d '{
+        "model": "gpt-4-vision",
+        "messages": [{
+          "role": "user",
+          "content": [
+            {"type": "text", "text": "What is in this image?"},
+            {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,/9j/4AAQ..."}}
+          ]
+        }]
+      }'
+    ```
+  </Step>
+</Steps>
+
+## Loading Multimodal Models
+
+### Automatic Loading (Recommended)
+
+Using `-hf` automatically downloads both the model and multimodal projector:
+
+```bash
+# Vision model
+./llama-server -hf ggml-org/gemma-3-4b-it-GGUF
+
+# Audio model
+./llama-server -hf ggml-org/ultravox-v0_5-llama-3_1-8b-GGUF
+
+# Mixed modality model
+./llama-server -hf ggml-org/Qwen2.5-Omni-7B-GGUF
+```
+
+### Manual Loading
+
+Specify the model and projector separately:
+
+```bash
+./llama-server -m model.gguf --mmproj projector.gguf
+```
+
+### Disable Multimodal
+
+```bash
+# Load model without multimodal projector
+./llama-server -hf ggml-org/gemma-3-4b-it-GGUF --no-mmproj
+
+# Or disable automatic loading
+./llama-server -hf ggml-org/gemma-3-4b-it-GGUF --no-mmproj-auto
+```
+
+### GPU Offloading
+
+By default, the multimodal projector is offloaded to GPU. To disable:
+
+```bash
+./llama-server -hf ggml-org/gemma-3-4b-it-GGUF --no-mmproj-offload
+```
+
+## Vision Models
+
+Vision models can analyze images and answer questions about visual content.
+
+### Available Vision Models
+
+<CodeGroup>
+```bash Gemma 3 (Recommended)
+# 4B parameter model
+./llama-server -hf ggml-org/gemma-3-4b-it-GGUF
+
+# 12B parameter model
+./llama-server -hf ggml-org/gemma-3-12b-it-GGUF
+
+# 27B parameter model
+./llama-server -hf ggml-org/gemma-3-27b-it-GGUF
+```
+
+```bash SmolVLM
+# SmolVLM Instruct
+./llama-server -hf ggml-org/SmolVLM-Instruct-GGUF
+
+# 256M parameter model
+./llama-server -hf ggml-org/SmolVLM-256M-Instruct-GGUF
+
+# 500M parameter model
+./llama-server -hf ggml-org/SmolVLM-500M-Instruct-GGUF
+
+# SmolVLM2 2.2B
+./llama-server -hf ggml-org/SmolVLM2-2.2B-Instruct-GGUF
+```
+
+```bash Qwen2-VL / Qwen2.5-VL
+# Qwen2-VL
+./llama-server -hf ggml-org/Qwen2-VL-2B-Instruct-GGUF
+./llama-server -hf ggml-org/Qwen2-VL-7B-Instruct-GGUF
+
+# Qwen2.5-VL (improved)
+./llama-server -hf ggml-org/Qwen2.5-VL-3B-Instruct-GGUF
+./llama-server -hf ggml-org/Qwen2.5-VL-7B-Instruct-GGUF
+./llama-server -hf ggml-org/Qwen2.5-VL-32B-Instruct-GGUF
+./llama-server -hf ggml-org/Qwen2.5-VL-72B-Instruct-GGUF
+```
+
+```bash Other Models
+# Pixtral 12B
+./llama-server -hf ggml-org/pixtral-12b-GGUF
+
+# InternVL2.5 and InternVL3
+./llama-server -hf ggml-org/InternVL2_5-4B-GGUF
+./llama-server -hf ggml-org/InternVL3-8B-Instruct-GGUF
+
+# Llama 4 Scout
+./llama-server -hf ggml-org/Llama-4-Scout-17B-16E-Instruct-GGUF
+
+# Moondream2
+./llama-server -hf ggml-org/moondream2-20250414-GGUF
+
+# Mistral Small (IQ2_M quant)
+./llama-server -hf ggml-org/Mistral-Small-3.1-24B-Instruct-2503-GGUF
+```
+</CodeGroup>
+
+<Note>
+Some models may require a larger context window. Use `-c 8192` or higher if you encounter issues.
+</Note>
+
+### Using Vision Models
+
+#### With CLI
+
+```bash
+# Start interactive session
+./llama-cli -hf ggml-org/gemma-3-4b-it-GGUF -cnv
+
+# Send image with prompt
+./llama-cli -hf ggml-org/gemma-3-4b-it-GGUF \
+  --image photo.jpg \
+  -p "Describe this image in detail"
+
+# Multiple images
+./llama-cli -hf ggml-org/gemma-3-4b-it-GGUF \
+  --image "image1.jpg,image2.png" \
+  -p "Compare these two images"
+```
+
+#### With Server (OpenAI API)
+
+```bash
+curl http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-4-vision",
+    "messages": [{
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "What objects are in this image?"
+        },
+        {
+          "type": "image_url",
+          "image_url": {
+            "url": "data:image/jpeg;base64,/9j/4AAQSkZJRg..."
+          }
+        }
+      ]
+    }],
+    "max_tokens": 300
+  }'
+```
+
+#### Python Example
+
+```python
+import openai
+import base64
+
+client = openai.OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key="not-needed"
+)
+
+# Read and encode image
+with open("image.jpg", "rb") as f:
+    image_data = base64.b64encode(f.read()).decode("utf-8")
+
+# Make request
+response = client.chat.completions.create(
+    model="gpt-4-vision",
+    messages=[{
+        "role": "user",
+        "content": [
+            {"type": "text", "text": "What's in this image?"},
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:image/jpeg;base64,{image_data}"
+                }
+            }
+        ]
+    }],
+    max_tokens=300
+)
+
+print(response.choices[0].message.content)
+```
+
+### Image Input Formats
+
+Supported image formats:
+- **Base64 encoded**: `data:image/jpeg;base64,/9j/4AAQ...`
+- **Local files** (CLI): `--image path/to/image.jpg`
+- **URLs**: `https://example.com/image.jpg`
+
+### Dynamic Resolution
+
+Some vision models support dynamic resolution for better image understanding:
+
+```bash
+# Configure token limits for dynamic resolution
+./llama-server -hf ggml-org/Qwen2.5-VL-7B-Instruct-GGUF \
+  --image-min-tokens 64 \
+  --image-max-tokens 4096
+```
+
+<ParamField path="--image-min-tokens" type="integer" default="model default">
+  Minimum tokens each image can use (for dynamic resolution models)
+</ParamField>
+
+<ParamField path="--image-max-tokens" type="integer" default="model default">
+  Maximum tokens each image can use (for dynamic resolution models)
+</ParamField>
+
+## Audio Models
+
+Audio models process speech and audio content.
+
+<Note>
+Audio support is highly experimental and may have reduced quality compared to vision models.
+</Note>
+
+### Available Audio Models
+
+```bash
+# Ultravox 0.5 (1B parameters)
+./llama-server -hf ggml-org/ultravox-v0_5-llama-3_2-1b-GGUF
+
+# Ultravox 0.5 (8B parameters)
+./llama-server -hf ggml-org/ultravox-v0_5-llama-3_1-8b-GGUF
+
+# Mistral Voxtral Mini
+./llama-server -hf ggml-org/Voxtral-Mini-3B-2507-GGUF
+```
+
+### Using Audio Models
+
+#### With CLI
+
+```bash
+# Start with audio model
+./llama-cli -hf ggml-org/ultravox-v0_5-llama-3_1-8b-GGUF -cnv
+
+# Process audio file
+./llama-cli -hf ggml-org/ultravox-v0_5-llama-3_1-8b-GGUF \
+  --audio speech.wav \
+  -p "Transcribe and summarize this audio"
+```
+
+#### With Server
+
+```bash
+curl http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "audio-model",
+    "messages": [{
+      "role": "user",
+      "content": [
+        {"type": "text", "text": "What is said in this audio?"},
+        {
+          "type": "input_audio",
+          "input_audio": {
+            "data": "base64_encoded_audio_data",
+            "format": "wav"
+          }
+        }
+      ]
+    }]
+  }'
+```
+
+## Mixed Modality Models
+
+Some models support multiple input modalities simultaneously.
+
+### Qwen2.5-Omni
+
+Capabilities: Audio input, vision input, text output
+
+```bash
+# 3B parameter model
+./llama-server -hf ggml-org/Qwen2.5-Omni-3B-GGUF
+
+# 7B parameter model
+./llama-server -hf ggml-org/Qwen2.5-Omni-7B-GGUF
+```
+
+### Using Mixed Modality
+
+```bash
+curl http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "omni",
+    "messages": [{
+      "role": "user",
+      "content": [
+        {"type": "text", "text": "Describe what you see and hear"},
+        {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,..."}},
+        {"type": "input_audio", "input_audio": {"data": "base64_audio", "format": "wav"}}
+      ]
+    }]
+  }'
+```
+
+## Finding More Models
+
+Discover GGUF multimodal models on Hugging Face:
+
+- **Vision models**: https://huggingface.co/models?pipeline_tag=image-text-to-text&sort=trending&search=gguf
+- **ggml-org collection**: https://huggingface.co/collections/ggml-org/multimodal-ggufs-68244e01ff1f39e5bebeeedc
+
+## Common Use Cases
+
+### Image Analysis
+
+```bash
+# Object detection
+curl http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "vision",
+    "messages": [{"role": "user", "content": [
+      {"type": "text", "text": "List all objects in this image"},
+      {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,..."}}
+    ]}]
+  }'
+```
+
+### OCR (Text Extraction)
+
+```bash
+# Extract text from image
+curl http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "vision",
+    "messages": [{"role": "user", "content": [
+      {"type": "text", "text": "Extract all text from this document image"},
+      {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,..."}}
+    ]}],
+    "temperature": 0.1
+  }'
+```
+
+### Image Comparison
+
+```python
+import openai
+import base64
+
+client = openai.OpenAI(base_url="http://localhost:8080/v1", api_key="not-needed")
+
+# Load two images
+with open("before.jpg", "rb") as f:
+    img1 = base64.b64encode(f.read()).decode()
+with open("after.jpg", "rb") as f:
+    img2 = base64.b64encode(f.read()).decode()
+
+# Compare images
+response = client.chat.completions.create(
+    model="vision",
+    messages=[{
+        "role": "user",
+        "content": [
+            {"type": "text", "text": "What are the differences between these two images?"},
+            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img1}"}},
+            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img2}"}}
+        ]
+    }]
+)
+
+print(response.choices[0].message.content)
+```
+
+### Speech Transcription
+
+```python
+import openai
+import base64
+
+client = openai.OpenAI(base_url="http://localhost:8080/v1", api_key="not-needed")
+
+# Load audio file
+with open("speech.wav", "rb") as f:
+    audio_data = base64.b64encode(f.read()).decode()
+
+# Transcribe
+response = client.chat.completions.create(
+    model="audio",
+    messages=[{
+        "role": "user",
+        "content": [
+            {"type": "text", "text": "Transcribe this audio"},
+            {
+                "type": "input_audio",
+                "input_audio": {"data": audio_data, "format": "wav"}
+            }
+        ]
+    }]
+)
+
+print(response.choices[0].message.content)
+```
+
+## Implementation Details
+
+### How Multimodal Works
+
+Multimodal models work by:
+
+1. **Encoding**: Images/audio are encoded into embeddings using a separate encoder model (the multimodal projector)
+2. **Integration**: These embeddings are combined with text token embeddings
+3. **Processing**: The main language model processes the combined embeddings
+4. **Generation**: The model generates text responses that incorporate understanding of all modalities
+
+### Media Markers
+
+In the prompt, multimodal data is represented by marker strings (e.g., `<__media__>`) that act as placeholders. The actual media data is passed separately and substituted in order.
+
+<Note>
+Clients must check the `/models` or `/v1/models` endpoint for the `multimodal` capability before sending multimodal requests.
+</Note>
+
+## Performance Optimization
+
+### GPU Acceleration
+
+```bash
+# Offload model and projector to GPU
+./llama-server -hf ggml-org/gemma-3-4b-it-GGUF -ngl 99
+
+# Disable projector offload if needed
+./llama-server -hf ggml-org/gemma-3-4b-it-GGUF -ngl 99 --no-mmproj-offload
+```
+
+### Context Window
+
+```bash
+# Increase context for large images or multiple images
+./llama-server -hf ggml-org/Qwen2.5-VL-7B-Instruct-GGUF -c 8192
+```
+
+### Batch Processing
+
+For processing multiple images:
+
+```python
+# Process multiple images in parallel
+images = ["img1.jpg", "img2.jpg", "img3.jpg"]
+results = []
+
+for img_path in images:
+    with open(img_path, "rb") as f:
+        img_data = base64.b64encode(f.read()).decode()
+    
+    response = client.chat.completions.create(
+        model="vision",
+        messages=[{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "Describe this image"},
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_data}"}}
+            ]
+        }]
+    )
+    results.append(response.choices[0].message.content)
+```
+
+## Troubleshooting
+
+### Model fails to load multimodal projector
+
+**Issue**: Projector not found or not loading
+
+**Solution**:
+- Ensure you're using `-hf` for automatic download
+- Or manually specify with `--mmproj projector.gguf`
+- Check that the projector file exists and is compatible
+
+### Images not being processed
+
+**Issue**: Model ignores image input
+
+**Solution**:
+- Verify the model supports vision (check model card)
+- Ensure projector is loaded (`--mmproj`)
+- Check image format (base64, supported file types)
+- Verify the image marker is in the prompt
+
+### Out of memory errors
+
+**Issue**: Crashes or OOM errors with large images
+
+**Solution**:
+- Reduce `--image-max-tokens`
+- Increase context size with `-c`
+- Use smaller images or resize before encoding
+- Enable GPU offloading with `-ngl`
+
+### Audio quality issues
+
+**Issue**: Poor audio transcription or understanding
+
+**Solution**:
+- Use higher quality audio files (16kHz+ sample rate)
+- Try different audio models
+- Ensure audio format is supported (WAV recommended)
+- Note that audio support is experimental
+
+## See Also
+
+<CardGroup cols={2}>
+  <Card title="Server" icon="server" href="/inference/server">
+    Full server API reference
+  </Card>
+  <Card title="CLI Tool" icon="terminal" href="/inference/cli">
+    Command-line multimodal usage
+  </Card>
+  <Card title="Embeddings" icon="diagram-project" href="/inference/embeddings">
+    Multimodal embeddings
+  </Card>
+  <Card title="Model Hub" icon="folder" href="https://huggingface.co/collections/ggml-org/multimodal-ggufs-68244e01ff1f39e5bebeeedc">
+    Pre-quantized multimodal models
+  </Card>
+</CardGroup>

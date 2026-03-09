@@ -1,0 +1,688 @@
+---
+title: Installation
+description: Complete guide to installing llama.cpp - from package managers to building from source with GPU acceleration
+---
+
+llama.cpp can be installed via package managers for quick setup, or built from source for GPU acceleration and custom configurations.
+
+## Package Managers (Recommended for CPU)
+
+The easiest way to install llama.cpp is through your system's package manager. These pre-built binaries work out-of-the-box but typically only include CPU support.
+
+<CardGroup cols={2}>
+  <Card title="Homebrew" icon="apple">
+    **macOS and Linux**
+
+    ```bash
+    brew install llama.cpp
+    ```
+
+    Automatically updated with new releases.
+  </Card>
+
+  <Card title="Winget" icon="windows">
+    **Windows**
+
+    ```bash
+    winget install llama.cpp
+    ```
+
+    Automatically updated with new releases.
+  </Card>
+
+  <Card title="MacPorts" icon="apple">
+    **macOS**
+
+    ```bash
+    sudo port install llama.cpp
+    ```
+
+    [More info →](https://ports.macports.org/port/llama.cpp/details/)
+  </Card>
+
+  <Card title="Nix" icon="snowflake">
+    **macOS and Linux**
+
+    ```bash
+    # Flake-enabled
+    nix profile install nixpkgs#llama-cpp
+
+    # Traditional
+    nix-env --file '<nixpkgs>' --install --attr llama-cpp
+    ```
+  </Card>
+</CardGroup>
+
+<Note>
+  Package manager installations are ideal for getting started quickly. For GPU acceleration, you'll need to [build from source](#building-from-source).
+</Note>
+
+## Docker Images
+
+Pre-built Docker images are available with and without GPU support:
+
+<Tabs>
+  <Tab title="CPU">
+    Three image variants are available:
+
+    ```bash
+    # Full image: includes CLI, completion, and conversion tools
+    docker pull ghcr.io/ggml-org/llama.cpp:full
+
+    # Light image: CLI and completion only
+    docker pull ghcr.io/ggml-org/llama.cpp:light
+
+    # Server image: HTTP server only
+    docker pull ghcr.io/ggml-org/llama.cpp:server
+    ```
+
+    **Example usage:**
+    ```bash
+    # Run inference
+    docker run -v /path/to/models:/models \
+      ghcr.io/ggml-org/llama.cpp:light \
+      -m /models/model.gguf -p "Hello world"
+
+    # Start server
+    docker run -v /path/to/models:/models -p 8080:8080 \
+      ghcr.io/ggml-org/llama.cpp:server \
+      -m /models/model.gguf --port 8080 --host 0.0.0.0
+    ```
+  </Tab>
+
+  <Tab title="CUDA">
+    NVIDIA GPU support:
+
+    ```bash
+    # Pull CUDA-enabled image
+    docker pull ghcr.io/ggml-org/llama.cpp:full-cuda
+    docker pull ghcr.io/ggml-org/llama.cpp:light-cuda
+    docker pull ghcr.io/ggml-org/llama.cpp:server-cuda
+    ```
+
+    **Example usage:**
+    ```bash
+    # Requires nvidia-container-toolkit
+    docker run --gpus all -v /path/to/models:/models \
+      ghcr.io/ggml-org/llama.cpp:light-cuda \
+      -m /models/model.gguf -ngl 99
+    ```
+
+    <Note>
+      Requires [nvidia-container-toolkit](https://github.com/NVIDIA/nvidia-container-toolkit) installed on the host.
+    </Note>
+  </Tab>
+
+  <Tab title="ROCm">
+    AMD GPU support:
+
+    ```bash
+    # Pull ROCm-enabled image
+    docker pull ghcr.io/ggml-org/llama.cpp:full-rocm
+    docker pull ghcr.io/ggml-org/llama.cpp:light-rocm
+    docker pull ghcr.io/ggml-org/llama.cpp:server-rocm
+    ```
+  </Tab>
+
+  <Tab title="Other GPUs">
+    Additional GPU backends:
+
+    ```bash
+    # Intel GPU (SYCL)
+    docker pull ghcr.io/ggml-org/llama.cpp:full-intel
+
+    # Moore Threads GPU (MUSA)
+    docker pull ghcr.io/ggml-org/llama.cpp:full-musa
+
+    # Vulkan
+    docker pull ghcr.io/ggml-org/llama.cpp:full-vulkan
+    ```
+  </Tab>
+</Tabs>
+
+## Pre-Built Binaries
+
+Download pre-compiled binaries directly from GitHub:
+
+1. Visit the [releases page](https://github.com/ggml-org/llama.cpp/releases)
+2. Download the appropriate binary for your platform
+3. Extract and add to your PATH
+
+<Warning>
+  Pre-built binaries may not include all GPU backends. For full GPU support, build from source.
+</Warning>
+
+## Building from Source
+
+Building from source enables GPU acceleration and custom configurations.
+
+<Steps>
+  <Step title="Get the source code">
+    Clone the repository:
+
+    ```bash
+    git clone https://github.com/ggml-org/llama.cpp
+    cd llama.cpp
+    ```
+  </Step>
+
+  <Step title="Choose your build configuration">
+    Select the appropriate build for your hardware:
+
+    <Tabs>
+      <Tab title="CPU Only">
+        Basic CPU build with no dependencies:
+
+        ```bash
+        cmake -B build
+        cmake --build build --config Release
+        ```
+
+        **For faster compilation:**
+        ```bash
+        # Use multiple jobs
+        cmake --build build --config Release -j 8
+
+        # Or use Ninja generator
+        cmake -B build -G Ninja
+        cmake --build build --config Release
+        ```
+
+        <Accordion title="Optional: OpenBLAS for better CPU performance">
+          Enable BLAS acceleration for faster prompt processing:
+
+          ```bash
+          # Install OpenBLAS first
+          # Ubuntu/Debian: sudo apt-get install libopenblas-dev
+          # Fedora: sudo dnf install openblas-devel
+          # macOS: brew install openblas
+
+          cmake -B build -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=OpenBLAS
+          cmake --build build --config Release
+          ```
+        </Accordion>
+      </Tab>
+
+      <Tab title="NVIDIA GPU (CUDA)">
+        Build with CUDA support for NVIDIA GPUs:
+
+        **Prerequisites:**
+        - [CUDA Toolkit](https://developer.nvidia.com/cuda-downloads) installed
+        - NVIDIA GPU with compute capability 3.5 or higher
+
+        **Build:**
+        ```bash
+        cmake -B build -DGGML_CUDA=ON
+        cmake --build build --config Release
+        ```
+
+        <AccordionGroup>
+          <Accordion title="Specify GPU architecture">
+            For faster compilation targeting specific GPUs:
+
+            ```bash
+            # Check your GPU's compute capability:
+            # RTX 4090: 8.9
+            # RTX 3080: 8.6
+            # RTX 2080: 7.5
+
+            cmake -B build -DGGML_CUDA=ON \
+              -DCMAKE_CUDA_ARCHITECTURES="86;89"
+            cmake --build build --config Release
+            ```
+          </Accordion>
+
+          <Accordion title="Multiple CUDA versions">
+            If you have multiple CUDA installations:
+
+            ```bash
+            cmake -B build -DGGML_CUDA=ON \
+              -DCMAKE_CUDA_COMPILER=/opt/cuda-11.7/bin/nvcc \
+              -DCMAKE_INSTALL_RPATH="/opt/cuda-11.7/lib64;\$ORIGIN" \
+              -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON
+            cmake --build build --config Release
+            ```
+          </Accordion>
+
+          <Accordion title="Optimize for multi-GPU setups">
+            For better performance with multiple GPUs:
+
+            ```bash
+            # Set at runtime
+            CUDA_SCALE_LAUNCH_QUEUES=4x ./build/bin/llama-cli -m model.gguf -ngl 99
+            ```
+
+            This increases CUDA's command buffer size for better pipeline parallelism.
+          </Accordion>
+        </AccordionGroup>
+      </Tab>
+
+      <Tab title="AMD GPU (ROCm)">
+        Build with ROCm/HIP support for AMD GPUs:
+
+        **Prerequisites:**
+        - [ROCm](https://rocm.docs.amd.com/) installed
+
+        **Build for Linux:**
+        ```bash
+        # Automatic GPU detection
+        HIPCXX="$(hipconfig -l)/clang" HIP_PATH="$(hipconfig -R)" \
+          cmake -B build -DGGML_HIP=ON -DCMAKE_BUILD_TYPE=Release
+        cmake --build build --config Release -j 16
+        ```
+
+        **Or target specific GPU:**
+        ```bash
+        # For RX 7900 XT/XTX (gfx1100)
+        HIPCXX="$(hipconfig -l)/clang" HIP_PATH="$(hipconfig -R)" \
+          cmake -B build -DGGML_HIP=ON -DGPU_TARGETS=gfx1100
+        cmake --build build --config Release
+        ```
+
+        <Accordion title="Find your GPU architecture">
+          ```bash
+          # Get your GPU's architecture
+          rocminfo | grep gfx | head -1 | awk '{print $2}'
+
+          # Common architectures:
+          # gfx1030 = RX 6000 series
+          # gfx1100 = RX 7900 XT/XTX
+          # gfx90a = MI200 series
+          ```
+        </Accordion>
+
+        <Accordion title="Windows build (ROCm)">
+          ```bash
+          # In x64 Native Tools Command Prompt for VS
+          set PATH=%HIP_PATH%\bin;%PATH%
+          cmake -B build -G Ninja -DGGML_HIP=ON \
+            -DGPU_TARGETS=gfx1100 \
+            -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_CXX_COMPILER=clang++ \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build
+          ```
+        </Accordion>
+      </Tab>
+
+      <Tab title="Apple Silicon (Metal)">
+        Metal is enabled by default on macOS:
+
+        ```bash
+        cmake -B build
+        cmake --build build --config Release
+        ```
+
+        Metal provides excellent performance on M1/M2/M3 chips.
+
+        <Accordion title="Disable Metal">
+          If you need CPU-only on macOS:
+
+          ```bash
+          cmake -B build -DGGML_METAL=OFF
+          cmake --build build --config Release
+          ```
+
+          At runtime, you can also disable GPU:
+          ```bash
+          llama-cli -m model.gguf --n-gpu-layers 0
+          ```
+        </Accordion>
+      </Tab>
+
+      <Tab title="Intel GPU (SYCL)">
+        Build with SYCL for Intel Data Center, Flex, Arc, and integrated GPUs:
+
+        See the [SYCL backend documentation](https://github.com/ggml-org/llama.cpp/blob/master/docs/backend/SYCL.md) for detailed instructions.
+      </Tab>
+
+      <Tab title="Vulkan">
+        Cross-platform GPU support via Vulkan:
+
+        **Prerequisites:**
+        - [Vulkan SDK](https://vulkan.lunarg.com/sdk/home) installed
+
+        **Linux:**
+        ```bash
+        # Using system packages
+        sudo apt-get install libvulkan-dev glslc  # Ubuntu/Debian
+
+        # Or source the Vulkan SDK
+        source /path/to/vulkan-sdk/setup-env.sh
+
+        # Build
+        cmake -B build -DGGML_VULKAN=1
+        cmake --build build --config Release
+        ```
+
+        **Windows (w64devkit):**
+        ```bash
+        # Copy Vulkan dependencies
+        SDK_VERSION=1.3.283.0
+        cp /VulkanSDK/$SDK_VERSION/Bin/glslc.exe $W64DEVKIT_HOME/bin/
+        cp /VulkanSDK/$SDK_VERSION/Lib/vulkan-1.lib \
+          $W64DEVKIT_HOME/x86_64-w64-mingw32/lib/
+
+        # Build
+        cmake -B build -DGGML_VULKAN=ON
+        cmake --build build --config Release
+        ```
+
+        **macOS:**
+        ```bash
+        # Install Vulkan SDK with KosmicKrisp
+        source /path/to/vulkan-sdk/setup-env.sh
+
+        # Use KosmicKrisp for better performance
+        export VK_ICD_FILENAMES=$VULKAN_SDK/share/vulkan/icd.d/libkosmickrisp_icd.json
+
+        # Build (disable Metal)
+        cmake -B build -DGGML_VULKAN=1 -DGGML_METAL=OFF
+        cmake --build build --config Release
+        ```
+      </Tab>
+    </Tabs>
+  </Step>
+
+  <Step title="Install (optional)">
+    Install the binaries to your system:
+
+    ```bash
+    # Install to /usr/local/bin
+    sudo cmake --install build
+
+    # Or specify custom prefix
+    cmake --install build --prefix ~/.local
+    ```
+
+    Or use directly from the build directory:
+    ```bash
+    ./build/bin/llama-cli -m model.gguf
+    ```
+  </Step>
+
+  <Step title="Verify GPU support">
+    Check that GPU acceleration is working:
+
+    ```bash
+    # List available devices
+    ./build/bin/llama-cli --list-devices
+
+    # Run with GPU
+    ./build/bin/llama-cli -m model.gguf -ngl 99
+    ```
+
+    You should see output indicating GPU layers are loaded:
+    ```
+    llm_load_tensors: using CUDA for GPU acceleration
+    llm_load_tensors: offloading 32 layers to GPU
+    ```
+  </Step>
+</Steps>
+
+## Platform-Specific Instructions
+
+<AccordionGroup>
+  <Accordion title="Windows with Visual Studio">
+    **Prerequisites:**
+    - Visual Studio 2022 with C++ development tools
+    - CMake (included with VS)
+
+    **Build:**
+    ```bash
+    # Open Developer Command Prompt for VS 2022
+    cmake -B build
+    cmake --build build --config Release
+    ```
+
+    **For ARM64 Windows:**
+    ```bash
+    cmake --preset arm64-windows-llvm-release -DGGML_OPENMP=OFF
+    cmake --build build-arm64-windows-llvm-release
+    ```
+  </Accordion>
+
+  <Accordion title="Android">
+    Building for Android requires the NDK. See the [Android build guide](https://github.com/ggml-org/llama.cpp/blob/master/docs/android.md) for complete instructions.
+
+    Quick example with OpenCL:
+    ```bash
+    cmake .. -G Ninja \
+      -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK/build/cmake/android.toolchain.cmake \
+      -DANDROID_ABI=arm64-v8a \
+      -DANDROID_PLATFORM=android-28 \
+      -DBUILD_SHARED_LIBS=OFF \
+      -DGGML_OPENCL=ON
+    ninja
+    ```
+  </Accordion>
+
+  <Accordion title="Static builds">
+    For portable binaries without shared library dependencies:
+
+    ```bash
+    cmake -B build \
+      -DBUILD_SHARED_LIBS=OFF \
+      -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+    cmake --build build --config Release
+    ```
+  </Accordion>
+
+  <Accordion title="Debug builds">
+    **Single-config generators (Make, Ninja):**
+    ```bash
+    cmake -B build -DCMAKE_BUILD_TYPE=Debug
+    cmake --build build
+    ```
+
+    **Multi-config generators (Visual Studio, Xcode):**
+    ```bash
+    cmake -B build -G "Xcode"
+    cmake --build build --config Debug
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Advanced Build Options
+
+<Tabs>
+  <Tab title="Performance">
+    **ccache for faster rebuilds:**
+    ```bash
+    # Install ccache
+    # Ubuntu/Debian: sudo apt-get install ccache
+    # macOS: brew install ccache
+
+    # CMake will detect and use it automatically
+    cmake -B build
+    cmake --build build --config Release
+    ```
+
+    **Intel oneMKL for better CPU performance:**
+    ```bash
+    source /opt/intel/oneapi/setvars.sh
+    cmake -B build \
+      -DGGML_BLAS=ON \
+      -DGGML_BLAS_VENDOR=Intel10_64lp \
+      -DCMAKE_C_COMPILER=icx \
+      -DCMAKE_CXX_COMPILER=icpx \
+      -DGGML_NATIVE=ON
+    cmake --build build --config Release
+    ```
+  </Tab>
+
+  <Tab title="Multiple Backends">
+    Build with multiple GPU backends:
+
+    ```bash
+    # CUDA + Vulkan
+    cmake -B build -DGGML_CUDA=ON -DGGML_VULKAN=ON
+    cmake --build build --config Release
+
+    # Select backend at runtime
+    ./build/bin/llama-cli --list-devices
+    ./build/bin/llama-cli -m model.gguf --device cuda
+    ```
+
+    **Dynamic backend loading:**
+    ```bash
+    # Build backends as dynamic libraries
+    cmake -B build -DGGML_BACKEND_DL=ON
+    cmake --build build --config Release
+    ```
+
+    This allows using the same binary on different machines with different GPUs.
+  </Tab>
+
+  <Tab title="Special Hardware">
+    **AMD CPU (ZenDNN):**
+    ```bash
+    cmake -B build -DGGML_ZENDNN=ON
+    cmake --build build --config Release
+    ```
+
+    **Arm CPUs (KleidiAI):**
+    ```bash
+    cmake -B build -DGGML_CPU_KLEIDIAI=ON
+    cmake --build build --config Release
+    ```
+
+    **Ascend NPU (CANN):**
+    ```bash
+    cmake -B build -DGGML_CANN=on -DCMAKE_BUILD_TYPE=release
+    cmake --build build --config release
+    ```
+  </Tab>
+
+  <Tab title="SSL/TLS Support">
+    Enable HTTPS support for llama-server:
+
+    ```bash
+    # Install OpenSSL development libraries first
+    # Ubuntu/Debian: sudo apt-get install libssl-dev
+    # Fedora: sudo dnf install openssl-devel
+    # macOS: brew install openssl
+
+    cmake -B build
+    cmake --build build --config Release
+    ```
+
+    CMake will automatically detect and enable OpenSSL if installed.
+  </Tab>
+</Tabs>
+
+## Verifying Installation
+
+Test your installation:
+
+```bash
+# Check version
+llama-cli --version
+
+# List available compute devices
+llama-cli --list-devices
+
+# Run a simple test
+llama-cli -m path/to/model.gguf -p "Test prompt" -n 10
+```
+
+Expected output should show:
+- Version information
+- Detected backends (CUDA, Metal, etc.)
+- Model loading messages
+- Generated text
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="CMake can't find CUDA">
+    **Issue:** `Could NOT find CUDA`
+
+    **Solutions:**
+    ```bash
+    # Verify CUDA is installed
+    nvcc --version
+
+    # Set CUDA path explicitly
+    export CUDA_PATH=/usr/local/cuda
+    cmake -B build -DGGML_CUDA=ON
+    ```
+  </Accordion>
+
+  <Accordion title="ROCm build errors">
+    **Issue:** `cannot find ROCm device library`
+
+    **Solution:**
+    ```bash
+    # Find the directory containing oclc_abi_version_400.bc
+    find $HIP_PATH -name "oclc_abi_version_400.bc"
+
+    # Set HIP_DEVICE_LIB_PATH
+    export HIP_DEVICE_LIB_PATH=/path/to/found/directory
+    cmake -B build -DGGML_HIP=ON
+    ```
+  </Accordion>
+
+  <Accordion title="Vulkan SDK not found">
+    **Issue:** CMake can't find Vulkan
+
+    **Solutions:**
+    ```bash
+    # Make sure to source the setup script
+    source /path/to/vulkan-sdk/setup-env.sh
+
+    # Verify Vulkan is available
+    vulkaninfo
+
+    # Rebuild
+    cmake -B build -DGGML_VULKAN=1
+    ```
+  </Accordion>
+
+  <Accordion title="Compilation is very slow">
+    **Solutions:**
+    ```bash
+    # Use parallel jobs
+    cmake --build build --config Release -j $(nproc)
+
+    # Or use Ninja (faster than Make)
+    cmake -B build -G Ninja
+    cmake --build build
+
+    # Install ccache
+    sudo apt-get install ccache  # Ubuntu/Debian
+    brew install ccache          # macOS
+    ```
+  </Accordion>
+
+  <Accordion title="Runtime GPU errors">
+    **Issue:** GPU detected but errors during inference
+
+    **Solutions:**
+    - Update GPU drivers to the latest version
+    - Try reducing layers offloaded: `-ngl 30` instead of `-ngl 99`
+    - Check VRAM usage: ensure model fits in available memory
+    - For CUDA: try setting `CUDA_VISIBLE_DEVICES=0`
+    - For ROCm: try setting `HIP_VISIBLE_DEVICES=0`
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Quick Start" icon="rocket" href="/quickstart">
+    Learn how to run your first inference and use common features
+  </Card>
+
+  <Card title="CLI Reference" icon="terminal" href="/cli">
+    Explore all available command-line options
+  </Card>
+
+  <Card title="Build Documentation" icon="hammer" href="https://github.com/ggml-org/llama.cpp/blob/master/docs/build.md">
+    Detailed build instructions and advanced configurations
+  </Card>
+
+  <Card title="Docker Guide" icon="docker" href="https://github.com/ggml-org/llama.cpp/blob/master/docs/docker.md">
+    Complete Docker setup and usage guide
+  </Card>
+</CardGroup>

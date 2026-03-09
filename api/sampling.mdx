@@ -1,0 +1,722 @@
+---
+title: 'Sampling'
+description: 'Token sampling strategies and the llama_sampler API'
+---
+
+## Overview
+
+The sampling API provides flexible token selection strategies for text generation. Samplers can be chained together to create complex sampling pipelines.
+
+## Sampler Chain
+
+A sampler chain applies multiple sampling strategies in sequence:
+
+```c
+// Initialize sampler chain
+LLAMA_API struct llama_sampler * llama_sampler_chain_init(
+    struct llama_sampler_chain_params params
+);
+
+// Add sampler to chain (takes ownership)
+LLAMA_API void llama_sampler_chain_add(
+    struct llama_sampler * chain,
+    struct llama_sampler * smpl
+);
+
+// Get sampler at index (-1 returns the chain itself)
+LLAMA_API struct llama_sampler * llama_sampler_chain_get(
+    struct llama_sampler * chain,
+    int32_t i
+);
+
+// Get number of samplers
+LLAMA_API int llama_sampler_chain_n(const struct llama_sampler * chain);
+
+// Remove sampler (returns ownership to caller)
+LLAMA_API struct llama_sampler * llama_sampler_chain_remove(
+    struct llama_sampler * chain,
+    int32_t i
+);
+```
+
+### Chain Parameters
+
+```c
+typedef struct llama_sampler_chain_params {
+    bool no_perf;  // Disable performance timing
+} llama_sampler_chain_params;
+
+LLAMA_API struct llama_sampler_chain_params llama_sampler_chain_default_params(void);
+```
+
+## Basic Usage
+
+<CodeGroup>
+```c Simple Greedy Sampling
+// Create sampler chain
+auto sparams = llama_sampler_chain_default_params();
+sparams.no_perf = false;
+
+llama_sampler * smpl = llama_sampler_chain_init(sparams);
+
+// Add greedy sampler (always picks highest probability token)
+llama_sampler_chain_add(smpl, llama_sampler_init_greedy());
+
+// Use in generation loop
+while (...) {
+    llama_decode(ctx, batch);
+    llama_token token = llama_sampler_sample(smpl, ctx, -1);
+    // ...
+}
+
+llama_sampler_free(smpl);
+```
+
+```c Standard Sampling Pipeline
+// Create chain
+llama_sampler * smpl = llama_sampler_chain_init(
+    llama_sampler_chain_default_params()
+);
+
+// Add samplers in order
+llama_sampler_chain_add(smpl, llama_sampler_init_top_k(40));
+llama_sampler_chain_add(smpl, llama_sampler_init_top_p(0.9, 1));
+llama_sampler_chain_add(smpl, llama_sampler_init_temp(0.8));
+llama_sampler_chain_add(smpl, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
+
+// Sample tokens
+llama_token token = llama_sampler_sample(smpl, ctx, -1);
+```
+</CodeGroup>
+
+## Sampling Function
+
+```c
+LLAMA_API llama_token llama_sampler_sample(
+    struct llama_sampler * smpl,
+    struct llama_context * ctx,
+    int32_t idx
+);
+```
+
+<ParamField path="smpl" type="llama_sampler *">
+  Sampler chain to use
+</ParamField>
+
+<ParamField path="ctx" type="llama_context *">
+  Context containing logits from latest decode
+</ParamField>
+
+<ParamField path="idx" type="int32_t">
+  Index of token to sample from (use `-1` for last token, supports negative indexing)
+</ParamField>
+
+<ResponseField name="return" type="llama_token">
+  The sampled token ID
+</ResponseField>
+
+<Note>
+This function is shorthand for getting logits, applying the sampler chain, and accepting the selected token.
+</Note>
+
+## Available Samplers
+
+### Greedy Sampling
+
+Always selects the token with highest probability:
+
+```c
+LLAMA_API struct llama_sampler * llama_sampler_init_greedy(void);
+```
+
+Use for deterministic, focused output.
+
+### Distribution Sampling
+
+Samples from the probability distribution:
+
+```c
+LLAMA_API struct llama_sampler * llama_sampler_init_dist(uint32_t seed);
+```
+
+<ParamField path="seed" type="uint32_t">
+  Random seed (use `LLAMA_DEFAULT_SEED` for random seed)
+</ParamField>
+
+Must be the last sampler in the chain (like greedy).
+
+### Top-K Sampling
+
+Keeps only the top K most likely tokens:
+
+```c
+LLAMA_API struct llama_sampler * llama_sampler_init_top_k(int32_t k);
+```
+
+<ParamField path="k" type="int32_t">
+  Number of top tokens to keep (`<= 0` disables)
+</ParamField>
+
+Reference: ["The Curious Case of Neural Text Degeneration"](https://arxiv.org/abs/1904.09751)
+
+<CodeGroup>
+```c Example
+// Keep top 40 tokens
+llama_sampler * top_k = llama_sampler_init_top_k(40);
+llama_sampler_chain_add(chain, top_k);
+```
+</CodeGroup>
+
+### Top-P (Nucleus) Sampling
+
+Keeps tokens with cumulative probability >= p:
+
+```c
+LLAMA_API struct llama_sampler * llama_sampler_init_top_p(
+    float p,
+    size_t min_keep
+);
+```
+
+<ParamField path="p" type="float">
+  Cumulative probability threshold (0.0 to 1.0)
+</ParamField>
+
+<ParamField path="min_keep" type="size_t">
+  Minimum number of tokens to keep
+</ParamField>
+
+Reference: ["The Curious Case of Neural Text Degeneration"](https://arxiv.org/abs/1904.09751)
+
+<CodeGroup>
+```c Example
+// Keep tokens until 90% cumulative probability
+llama_sampler * top_p = llama_sampler_init_top_p(0.9, 1);
+llama_sampler_chain_add(chain, top_p);
+```
+</CodeGroup>
+
+### Min-P Sampling
+
+Keeps tokens with probability >= p * max_probability:
+
+```c
+LLAMA_API struct llama_sampler * llama_sampler_init_min_p(
+    float p,
+    size_t min_keep
+);
+```
+
+<ParamField path="p" type="float">
+  Minimum probability threshold (relative to max)
+</ParamField>
+
+<ParamField path="min_keep" type="size_t">
+  Minimum number of tokens to keep
+</ParamField>
+
+Reference: https://github.com/ggml-org/llama.cpp/pull/3841
+
+### Temperature Sampling
+
+Scales logits by temperature (higher = more random):
+
+```c
+LLAMA_API struct llama_sampler * llama_sampler_init_temp(float t);
+```
+
+<ParamField path="t" type="float">
+  Temperature value. `t <= 0.0` keeps only the maximum logit, rest set to -inf
+</ParamField>
+
+Formula: `logit' = logit / temperature`
+
+<CodeGroup>
+```c Temperature Examples
+// Conservative sampling
+llama_sampler_init_temp(0.2);  // Very focused
+
+// Balanced sampling
+llama_sampler_init_temp(0.8);  // Standard
+
+// Creative sampling
+llama_sampler_init_temp(1.2);  // More random
+```
+</CodeGroup>
+
+### Dynamic Temperature
+
+Adaptive temperature based on entropy:
+
+```c
+LLAMA_API struct llama_sampler * llama_sampler_init_temp_ext(
+    float t,
+    float delta,
+    float exponent
+);
+```
+
+<ParamField path="t" type="float">Base temperature</ParamField>
+<ParamField path="delta" type="float">Temperature adjustment range</ParamField>
+<ParamField path="exponent" type="float">Entropy scaling exponent</ParamField>
+
+Reference: https://arxiv.org/abs/2309.02772
+
+### Typical Sampling
+
+Samples locally typical tokens:
+
+```c
+LLAMA_API struct llama_sampler * llama_sampler_init_typical(
+    float p,
+    size_t min_keep
+);
+```
+
+Reference: https://arxiv.org/abs/2202.00666
+
+### Mirostat Sampling
+
+Adaptive sampling that targets a specific perplexity:
+
+<CodeGroup>
+```c Mirostat v1
+LLAMA_API struct llama_sampler * llama_sampler_init_mirostat(
+    int32_t n_vocab,
+    uint32_t seed,
+    float tau,      // Target cross-entropy
+    float eta,      // Learning rate
+    int32_t m       // Tokens for estimation
+);
+
+// Example
+int32_t n_vocab = llama_vocab_n_tokens(vocab);
+llama_sampler * miro = llama_sampler_init_mirostat(
+    n_vocab,
+    LLAMA_DEFAULT_SEED,
+    5.0,   // tau
+    0.1,   // eta
+    100    // m
+);
+```
+
+```c Mirostat v2
+LLAMA_API struct llama_sampler * llama_sampler_init_mirostat_v2(
+    uint32_t seed,
+    float tau,      // Target cross-entropy
+    float eta       // Learning rate
+);
+
+// Example
+llama_sampler * miro2 = llama_sampler_init_mirostat_v2(
+    LLAMA_DEFAULT_SEED,
+    5.0,   // tau
+    0.1    // eta
+);
+```
+</CodeGroup>
+
+Reference: https://arxiv.org/abs/2007.14966
+
+<Note>
+Mirostat samplers select the final token, so they should be last in the chain (like greedy or dist).
+</Note>
+
+### Penalty Samplers
+
+Penalize repeated tokens:
+
+```c
+LLAMA_API struct llama_sampler * llama_sampler_init_penalties(
+    int32_t penalty_last_n,    // Last n tokens to consider (0 = disable, -1 = ctx size)
+    float penalty_repeat,      // Repetition penalty (1.0 = disabled)
+    float penalty_freq,        // Frequency penalty (0.0 = disabled)
+    float penalty_present      // Presence penalty (0.0 = disabled)
+);
+```
+
+<ParamField path="penalty_last_n" type="int32_t">
+  Number of recent tokens to penalize (`0` = disabled, `-1` = full context)
+</ParamField>
+
+<ParamField path="penalty_repeat" type="float">
+  Repetition penalty multiplier (`1.0` = no penalty, `> 1.0` = penalize)
+</ParamField>
+
+<ParamField path="penalty_freq" type="float">
+  Frequency penalty (`0.0` = disabled)
+</ParamField>
+
+<ParamField path="penalty_present" type="float">
+  Presence penalty (`0.0` = disabled)
+</ParamField>
+
+<CodeGroup>
+```c Example
+// Penalize repetition in last 64 tokens
+llama_sampler * penalties = llama_sampler_init_penalties(
+    64,    // last_n
+    1.1,   // repeat penalty
+    0.0,   // freq penalty
+    0.0    // presence penalty
+);
+llama_sampler_chain_add(chain, penalties);
+```
+</CodeGroup>
+
+<Note>
+Avoid using penalties with full vocabulary as searching can be slow. Apply top-k/top-p first.
+</Note>
+
+### DRY Sampler
+
+"Don't Repeat Yourself" sampler:
+
+```c
+LLAMA_API struct llama_sampler * llama_sampler_init_dry(
+    const struct llama_vocab * vocab,
+    int32_t n_ctx_train,
+    float dry_multiplier,
+    float dry_base,
+    int32_t dry_allowed_length,
+    int32_t dry_penalty_last_n,
+    const char ** seq_breakers,
+    size_t num_breakers
+);
+```
+
+Reference: https://github.com/oobabooga/text-generation-webui/pull/5677
+
+### Adaptive-P Sampler
+
+Maintains target probability over time:
+
+```c
+LLAMA_API struct llama_sampler * llama_sampler_init_adaptive_p(
+    float target,     // Target probability (0.0-1.0, negative = disabled)
+    float decay,      // EMA decay (0.0-0.99)
+    uint32_t seed     // Random seed
+);
+```
+
+<Note>
+Adaptive-P selects the final token and should be last in the chain. Use mild truncation (e.g., min-p) before this sampler.
+</Note>
+
+Reference: https://github.com/ggml-org/llama.cpp/pull/17927
+
+### XTC Sampler
+
+```c
+LLAMA_API struct llama_sampler * llama_sampler_init_xtc(
+    float p,
+    float t,
+    size_t min_keep,
+    uint32_t seed
+);
+```
+
+Reference: https://github.com/oobabooga/text-generation-webui/pull/6335
+
+### Top-nσ Sampler
+
+```c
+LLAMA_API struct llama_sampler * llama_sampler_init_top_n_sigma(float n);
+```
+
+Reference: https://arxiv.org/pdf/2411.07641
+
+### Grammar Sampler
+
+Constrain output to match a GBNF grammar:
+
+```c
+LLAMA_API struct llama_sampler * llama_sampler_init_grammar(
+    const struct llama_vocab * vocab,
+    const char * grammar_str,
+    const char * grammar_root
+);
+```
+
+<ParamField path="vocab" type="const llama_vocab *">
+  Vocabulary for tokenization
+</ParamField>
+
+<ParamField path="grammar_str" type="const char *">
+  GBNF grammar production rules
+</ParamField>
+
+<ParamField path="grammar_root" type="const char *">
+  Start symbol name
+</ParamField>
+
+See `grammars/README.md` for grammar syntax.
+
+### Logit Bias
+
+Manually bias specific tokens:
+
+```c
+typedef struct llama_logit_bias {
+    llama_token token;
+    float bias;
+} llama_logit_bias;
+
+LLAMA_API struct llama_sampler * llama_sampler_init_logit_bias(
+    int32_t n_vocab,
+    int32_t n_logit_bias,
+    const llama_logit_bias * logit_bias
+);
+```
+
+<CodeGroup>
+```c Example
+// Increase probability of token 123, decrease 456
+llama_logit_bias biases[] = {
+    {.token = 123, .bias = 1.5},   // Boost
+    {.token = 456, .bias = -1.5},  // Suppress
+};
+
+llama_sampler * bias = llama_sampler_init_logit_bias(
+    llama_vocab_n_tokens(vocab),
+    2,
+    biases
+);
+```
+</CodeGroup>
+
+### Infill Sampler
+
+For fill-in-the-middle tasks:
+
+```c
+LLAMA_API struct llama_sampler * llama_sampler_init_infill(
+    const struct llama_vocab * vocab
+);
+```
+
+Use after top-k/top-p. Combines prefix probabilities and handles EOG tokens specially.
+
+## Sampler Management
+
+### Clone and Free
+
+```c
+// Clone a sampler
+LLAMA_API struct llama_sampler * llama_sampler_clone(
+    const struct llama_sampler * smpl
+);
+
+// Free a sampler (don't free if added to chain)
+LLAMA_API void llama_sampler_free(struct llama_sampler * smpl);
+```
+
+<Note>
+Do not manually free samplers that have been added to a chain. The chain takes ownership and will free them automatically.
+</Note>
+
+### Manual Application
+
+```c
+// Apply sampler to token data array
+LLAMA_API void llama_sampler_apply(
+    struct llama_sampler * smpl,
+    llama_token_data_array * cur_p
+);
+
+// Accept a selected token (update sampler state)
+LLAMA_API void llama_sampler_accept(
+    struct llama_sampler * smpl,
+    llama_token token
+);
+
+// Reset sampler state
+LLAMA_API void llama_sampler_reset(struct llama_sampler * smpl);
+
+// Get sampler name
+LLAMA_API const char * llama_sampler_name(const struct llama_sampler * smpl);
+```
+
+### Get Seed
+
+```c
+LLAMA_API uint32_t llama_sampler_get_seed(const struct llama_sampler * smpl);
+```
+
+Returns the seed used by the sampler, or `LLAMA_DEFAULT_SEED` if not applicable.
+
+## Performance Monitoring
+
+```c
+struct llama_perf_sampler_data {
+    double t_sample_ms;  // Time spent sampling (milliseconds)
+    int32_t n_sample;    // Number of tokens sampled
+};
+
+LLAMA_API struct llama_perf_sampler_data llama_perf_sampler(
+    const struct llama_sampler * chain
+);
+
+LLAMA_API void llama_perf_sampler_print(const struct llama_sampler * chain);
+LLAMA_API void llama_perf_sampler_reset(struct llama_sampler * chain);
+```
+
+<Note>
+Performance functions only work with sampler chains created via `llama_sampler_chain_init`.
+</Note>
+
+## Common Sampling Configurations
+
+<CodeGroup>
+```c Greedy (Deterministic)
+llama_sampler * smpl = llama_sampler_chain_init(
+    llama_sampler_chain_default_params()
+);
+llama_sampler_chain_add(smpl, llama_sampler_init_greedy());
+```
+
+```c Standard (Balanced)
+llama_sampler * smpl = llama_sampler_chain_init(
+    llama_sampler_chain_default_params()
+);
+llama_sampler_chain_add(smpl, llama_sampler_init_top_k(40));
+llama_sampler_chain_add(smpl, llama_sampler_init_top_p(0.9, 1));
+llama_sampler_chain_add(smpl, llama_sampler_init_temp(0.8));
+llama_sampler_chain_add(smpl, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
+```
+
+```c Creative (High Randomness)
+llama_sampler * smpl = llama_sampler_chain_init(
+    llama_sampler_chain_default_params()
+);
+llama_sampler_chain_add(smpl, llama_sampler_init_top_k(100));
+llama_sampler_chain_add(smpl, llama_sampler_init_top_p(0.95, 1));
+llama_sampler_chain_add(smpl, llama_sampler_init_temp(1.2));
+llama_sampler_chain_add(smpl, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
+```
+
+```c Focused with Penalties
+llama_sampler * smpl = llama_sampler_chain_init(
+    llama_sampler_chain_default_params()
+);
+llama_sampler_chain_add(smpl, llama_sampler_init_top_k(40));
+llama_sampler_chain_add(smpl, llama_sampler_init_penalties(64, 1.1, 0.0, 0.0));
+llama_sampler_chain_add(smpl, llama_sampler_init_temp(0.7));
+llama_sampler_chain_add(smpl, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
+```
+
+```c Mirostat (Adaptive)
+llama_sampler * smpl = llama_sampler_chain_init(
+    llama_sampler_chain_default_params()
+);
+llama_sampler_chain_add(smpl, llama_sampler_init_temp(0.8));
+llama_sampler_chain_add(smpl, 
+    llama_sampler_init_mirostat_v2(LLAMA_DEFAULT_SEED, 5.0, 0.1)
+);
+```
+</CodeGroup>
+
+## Complete Sampling Example
+
+<CodeGroup>
+```c sampling-example.c
+#include "llama.h"
+#include <stdio.h>
+
+int main() {
+    // ... (model and context setup) ...
+    
+    // Create comprehensive sampling chain
+    llama_sampler * smpl = llama_sampler_chain_init(
+        llama_sampler_chain_default_params()
+    );
+    
+    // 1. Remove unlikely tokens (top-k)
+    llama_sampler_chain_add(smpl, llama_sampler_init_top_k(40));
+    
+    // 2. Penalize repetition
+    llama_sampler_chain_add(smpl, 
+        llama_sampler_init_penalties(
+            64,    // last 64 tokens
+            1.1,   // repeat penalty
+            0.0,   // freq penalty
+            0.0    // presence penalty
+        )
+    );
+    
+    // 3. Apply nucleus sampling
+    llama_sampler_chain_add(smpl, llama_sampler_init_top_p(0.9, 1));
+    
+    // 4. Scale by temperature
+    llama_sampler_chain_add(smpl, llama_sampler_init_temp(0.8));
+    
+    // 5. Sample from distribution
+    llama_sampler_chain_add(smpl, 
+        llama_sampler_init_dist(LLAMA_DEFAULT_SEED)
+    );
+    
+    // Generation loop
+    for (int i = 0; i < n_predict; i++) {
+        // Decode current batch
+        if (llama_decode(ctx, batch) != 0) {
+            fprintf(stderr, "Decode failed\n");
+            break;
+        }
+        
+        // Sample next token
+        llama_token token = llama_sampler_sample(smpl, ctx, -1);
+        
+        if (llama_vocab_is_eog(vocab, token)) {
+            break;
+        }
+        
+        // Print and continue
+        char buf[128];
+        int n = llama_token_to_piece(vocab, token, buf, sizeof(buf), 0, true);
+        printf("%.*s", n, buf);
+        fflush(stdout);
+        
+        batch = llama_batch_get_one(&token, 1);
+    }
+    
+    // Print performance stats
+    llama_perf_sampler_print(smpl);
+    
+    // Cleanup
+    llama_sampler_free(smpl);
+    // ... (free context and model) ...
+    
+    return 0;
+}
+```
+</CodeGroup>
+
+## Token Data Array (Advanced)
+
+For manual sampling without `llama_sampler_sample`:
+
+```c
+typedef struct llama_token_data {
+    llama_token id;   // Token ID
+    float logit;      // Log-odds
+    float p;          // Probability
+} llama_token_data;
+
+typedef struct llama_token_data_array {
+    llama_token_data * data;
+    size_t size;
+    int64_t selected;  // Index of selected token (not token ID)
+    bool sorted;       // Don't assume sorted, always check this flag
+} llama_token_data_array;
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Inference" icon="microchip" href="/api/inference">
+    Learn about batching and decoding
+  </Card>
+  <Card title="libllama Overview" icon="book" href="/api/libllama">
+    Return to API overview
+  </Card>
+</CardGroup>
