@@ -126,5 +126,8 @@
     ]
   },
   "favicon": "/images/134263123.jpeg",
-  "logo": "/images/llamacpp.png"
+  "logo": {
+    "light": "/images/Gemini_Generated_Image_6p05p86p05p86p05-removebg-preview.png",
+    "dark": "/images/llamacpp.png"
+  }
 }
